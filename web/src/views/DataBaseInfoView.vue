@@ -159,7 +159,7 @@ const isGraphSupported = computed(() => {
 // 计算属性：是否支持评估功能
 const isEvaluationSupported = computed(() => {
   const kbType = database.value.kb_type?.toLowerCase()
-  return kbType === 'milvus'
+  return ['milvus', 'chroma'].includes(kbType)
 })
 
 // 计算待解析文件数量（status: 'uploaded'）

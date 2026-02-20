@@ -1,5 +1,6 @@
 """PostgreSQL 业务数据模型 - 用户、部门、对话等相关表"""
 
+import datetime as dt
 from typing import Any
 
 from sqlalchemy import (
@@ -109,6 +110,22 @@ class User(Base):
             return 0
         remaining = int((self.login_locked_until - utc_now_naive()).total_seconds())
         return max(0, remaining)
+
+    def calculate_lock_duration(self) -> int:
+        """根据失败次数计算锁定时长（秒）"""
+        if self.login_failed_count < 10:
+            return 0
+        wait_seconds = 2 ** (self.login_failed_count - 10)
+        max_seconds = 365 * 24 * 60 * 60
+        return min(wait_seconds, max_seconds)
+
+    def increment_failed_login(self) -> None:
+        """增加登录失败次数并设置锁定时间"""
+        self.login_failed_count += 1
+        self.last_failed_login = utc_now_naive()
+        lock_duration = self.calculate_lock_duration()
+        if lock_duration > 0:
+            self.login_locked_until = utc_now_naive() + dt.timedelta(seconds=lock_duration)
 
     def reset_failed_login(self):
         """重置登录失败相关字段"""

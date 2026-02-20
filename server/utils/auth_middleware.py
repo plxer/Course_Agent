@@ -20,6 +20,8 @@ PUBLIC_PATHS = [
     r"^/api$",  # Health Check
     r"^/api/system/health$",  # Health Check
     r"^/api/system/info$",  # 获取系统信息配置
+    r"^/api/course/books",  # 课本伴读（列表、页数、页面图、OCR）
+    r"^/api/course/videos",  # 视频伴读
 ]
 
 

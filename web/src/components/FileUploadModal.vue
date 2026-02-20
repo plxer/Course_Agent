@@ -570,7 +570,7 @@ const indexParams = ref({
 // 计算属性：是否支持QA分割
 const isQaSplitSupported = computed(() => {
   const type = kbType.value?.toLowerCase()
-  return type === 'milvus'
+  return ['milvus', 'chroma'].includes(type)
 })
 
 const isGraphBased = computed(() => {

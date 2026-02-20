@@ -377,7 +377,7 @@ const buildRequestData = () => {
   }
 
   // 根据类型添加特定配置
-  if (['milvus'].includes(newDatabase.kb_type)) {
+  if (['milvus', 'chroma'].includes(newDatabase.kb_type)) {
     if (newDatabase.storage) {
       requestData.additional_params.storage = newDatabase.storage
     }

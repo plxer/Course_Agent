@@ -81,6 +81,12 @@ docker compose up --build -d
 
 **注意**：启动后，可能还需要一些时间，尤其是后端服务需要一段时间，请耐心等待 2-3 分钟。
 
+默认启动**不包含 Milvus**（仅使用 Chroma / LightRAG 等类型知识库时无需 Milvus）。若需使用 **Milvus** 或 **LightRAG** 类型知识库，请带 profile 启动：
+
+```bash
+docker compose --profile milvus up -d
+```
+
 #### 4. 访问系统
 
 服务启动完成后，访问以下地址：
@@ -93,6 +99,10 @@ docker compose up --build -d
 ```bash
 docker compose down
 ```
+
+::: info 无 Docker 环境
+若服务器不支持 Docker，可在本机安装 PostgreSQL、Neo4j、Milvus、MinIO 等依赖后，使用仓库内 [手动启动说明](../../vibe/manual-setup.md)（`docs/vibe/manual-setup.md`）进行启动，Docker 启动方式不受影响。
+:::
 
 ## 对话
 
@@ -178,12 +188,16 @@ $env:HTTPS_PROXY="http://IP:PORT"
 </details>
 
 <details>
-<summary><strong>Milvus 启动失败</strong></summary>
+<summary><strong>Milvus 启动失败 / 需要启用 Milvus</strong></summary>
+
+Milvus 为可选服务，仅在使用 **Milvus** 或 **LightRAG** 类型知识库时需要。默认 `docker compose up -d` 不会启动 Milvus。
+
+如需启动 Milvus：
 
 ```bash
-# 重启 Milvus 服务
-docker compose up milvus -d
-docker restart api-dev
+docker compose --profile milvus up -d
+# 若已有其他服务在运行，仅启动 Milvus 及其依赖（etcd）
+docker compose --profile milvus up milvus -d
 ```
 
 </details>

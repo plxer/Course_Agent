@@ -1,5 +1,5 @@
 
-.PHONY: start stop logs lint format format_diff router-tests
+.PHONY: start stop logs lint format format_diff router-tests start-api-manual start-web-manual
 
 PYTEST_ARGS ?=
 
@@ -29,6 +29,13 @@ logs:
 	@echo "\n\nBranch: $$(git branch --show-current)"
 	@echo "Commit ID: $$(git rev-parse HEAD)"
 	@echo "System: $$(uname -a)"
+
+# 手动启动（非 Docker）：需先启动 PostgreSQL / Neo4j / Milvus / MinIO / etcd，见 docs/vibe/manual-setup.md
+start-api-manual:
+	./scripts/start-api.sh
+
+start-web-manual:
+	./scripts/start-web.sh
 
 ######################
 # LINTING AND FORMATTING

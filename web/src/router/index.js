@@ -7,8 +7,11 @@ import { useAgentStore } from '@/stores/agent'
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
+    // 默认首页：直接进入课程智能体（你的前端）
+    { path: '/', redirect: '/course' },
+    // 语析平台原首页（智能体/知识图谱/知识库入口）
     {
-      path: '/',
+      path: '/platform',
       name: 'main',
       component: BlankLayout,
       children: [
@@ -89,6 +92,37 @@ const router = createRouter({
           meta: { keepAlive: false, requiresAuth: true, requiresAdmin: true }
         }
       ]
+    },
+    // 课程智能体（计算机网络等）：问答、课本伴读、视频、习题推荐
+    {
+      path: '/course',
+      name: 'courseHome',
+      component: () => import('../views/course/ConversationView.vue'),
+      meta: { requiresAuth: false }
+    },
+    {
+      path: '/conversation',
+      name: 'courseConversation',
+      component: () => import('../views/course/ConversationView.vue'),
+      meta: { requiresAuth: false }
+    },
+    {
+      path: '/exercises',
+      name: 'courseExercises',
+      component: () => import('../views/course/ExercisesView.vue'),
+      meta: { requiresAuth: false }
+    },
+    {
+      path: '/reading',
+      name: 'courseReading',
+      component: () => import('../views/course/ReadingView.vue'),
+      meta: { requiresAuth: false }
+    },
+    {
+      path: '/videos',
+      name: 'courseVideos',
+      component: () => import('../views/course/VideosView.vue'),
+      meta: { requiresAuth: false }
     },
     {
       path: '/:pathMatch(.*)*',

@@ -13,6 +13,7 @@ services:
       - ./test:/app/test
       - ./scripts:/app/scripts
       - ./.env:/app/.env
+      - ./knowledgebase:/app/knowledgebase  # 课本 PDF：knowledgebase/books/*.pdf
       - ${MODEL_DIR:-./models}:/models  # 使用默认值处理未定义的环境变量
     ports:
       - "5050:5050"
@@ -51,8 +52,6 @@ services:
       start_period: 180s
     depends_on:
       postgres:
-        condition: service_healthy
-      milvus:
         condition: service_healthy
       minio:
         condition: service_healthy
@@ -109,6 +108,8 @@ services:
 
   etcd:
     container_name: milvus-etcd-dev
+    profiles:
+      - milvus
     image: quay.io/coreos/etcd:v3.5.5
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
@@ -152,6 +153,8 @@ services:
     restart: unless-stopped
 
   milvus:
+    profiles:
+      - milvus
     image: milvusdb/milvus:v2.5.6
     container_name: milvus
     command: ["milvus", "run", "standalone"]
@@ -184,7 +187,7 @@ services:
     image: postgres:16
     container_name: postgres
     ports:
-      - "5432:5432"
+      - "5433:5432"  # host 5433 to avoid conflict with local PostgreSQL on 5432
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}

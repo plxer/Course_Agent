@@ -7,13 +7,12 @@ from lightrag.kg.shared_storage import initialize_pipeline_status
 from lightrag.llm.openai import openai_complete_if_cache, openai_embed
 from lightrag.utils import EmbeddingFunc
 from neo4j import GraphDatabase
-from pymilvus import connections, utility
 
 from src import config
 from src.knowledge.base import FileStatus, KnowledgeBase
 from src.knowledge.indexing import process_file_to_markdown
 from src.knowledge.utils.kb_utils import get_embedding_config
-from src.utils import hashstr, logger
+from src.utils import logger
 from src.utils.datetime_utils import utc_isoformat
 
 
@@ -41,28 +40,7 @@ class LightRagKB(KnowledgeBase):
         return "lightrag"
 
     def delete_database(self, db_id: str) -> dict:
-        """删除数据库，同时清除Milvus和Neo4j中的数据"""
-        # Drop Milvus collection
-        try:
-            milvus_uri = os.getenv("MILVUS_URI") or "http://localhost:19530"
-            milvus_token = os.getenv("MILVUS_TOKEN") or ""
-            connection_alias = f"lightrag_{hashstr(db_id, 6)}"
-
-            connections.connect(alias=connection_alias, uri=milvus_uri, token=milvus_token)
-
-            # 删除 LightRAG 创建的三个集合
-            collection_names = [f"{db_id}_chunks", f"{db_id}_relationships", f"{db_id}_entities"]
-            for collection_name in collection_names:
-                if utility.has_collection(collection_name, using=connection_alias):
-                    utility.drop_collection(collection_name, using=connection_alias)
-                    logger.info(f"Dropped Milvus collection {collection_name}")
-                else:
-                    logger.info(f"Milvus collection {collection_name} does not exist, skipping")
-
-            connections.disconnect(connection_alias)
-        except Exception as e:
-            logger.error(f"Failed to drop Milvus collection {db_id}: {e}")
-
+        """删除数据库，同时清除 Neo4j 中的数据；向量数据随 working_dir 由基类一并删除（NanoVectorDBStorage）"""
         # Delete Neo4j data
         neo4j_uri = os.getenv("NEO4J_URI") or "bolt://localhost:7687"
         neo4j_username = os.getenv("NEO4J_USERNAME") or "neo4j"
@@ -121,7 +99,8 @@ class LightRagKB(KnowledgeBase):
             workspace=db_id,
             llm_model_func=self._get_llm_func(llm_info),
             embedding_func=self._get_embedding_func(embed_info),
-            vector_storage="MilvusVectorDBStorage",
+            # 使用 NanoVectorDBStorage 时无需部署 Milvus；改为 "MilvusVectorDBStorage" 可接入 Milvus 以支持更大规模
+            vector_storage="NanoVectorDBStorage",
             kv_storage="JsonKVStorage",
             graph_storage="Neo4JStorage",
             doc_status_storage="JsonDocStatusStorage",
@@ -632,10 +611,8 @@ class LightRagKB(KnowledgeBase):
         使用 LightRAG 原生功能导出知识库数据。
         [注意] 此功能当前已禁用。
         """
-        # TODO: 修复 LightRAG 库与 Milvus 后端不兼容的问题
-        # 当前调用 aexport_data 会导致 "'MilvusVectorDBStorage' object has no attribute 'client_storage'" 错误。
-        # 在 lightrag 库修复此问题前，暂时禁用此功能。
-        raise NotImplementedError("由于 LightRAG 库与 Milvus 后端不兼容，原生导出功能暂不可用。等待上游库修复。")
+        # TODO: LightRAG 库的导出接口与当前存储后端不兼容，暂不可用
+        raise NotImplementedError("LightRAG 知识库的原生导出功能暂不可用。等待上游库修复。")
 
         # --- 以下为待修复后启用的代码 ---
         # logger.info(f"Exporting data for db_id {db_id} in format {format} with options {kwargs}")
