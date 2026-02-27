@@ -84,6 +84,13 @@ class InitializeAdmin(BaseModel):
     phone_number: str | None = None
 
 
+class RegisterRequest(BaseModel):
+    """用户自助注册请求（无需登录）"""
+    username: str
+    password: str
+    phone_number: str | None = None
+
+
 class UsernameValidation(BaseModel):
     username: str
 
@@ -287,6 +294,71 @@ async def initialize_admin(admin_data: InitializeAdmin, db: AsyncSession = Depen
         "phone_number": new_admin.phone_number,
         "avatar": new_admin.avatar,
         "role": new_admin.role,
+    }
+
+
+# 路由：用户自助注册（公开，无需登录）
+@auth.post("/register", response_model=Token)
+async def register_user(register_data: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    """新用户注册，注册成功后返回 token 并视为已登录。"""
+    # 系统必须已初始化（至少有一个管理员）
+    if await pg_manager.async_check_first_run():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="系统尚未初始化，暂不开放注册",
+        )
+
+    # 验证用户名
+    is_valid, error_msg = validate_username(register_data.username)
+    if not is_valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+
+    user_repo = UserRepository()
+    if await user_repo.exists_by_username(register_data.username):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名已被使用")
+
+    if register_data.phone_number:
+        if not is_valid_phone_number(register_data.phone_number):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="手机号格式不正确")
+        if await user_repo.exists_by_phone(register_data.phone_number):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="手机号已被使用")
+
+    existing_user_ids = await user_repo.get_all_user_ids()
+    user_id = generate_unique_user_id(register_data.username, existing_user_ids)
+    hashed_password = AuthUtils.hash_password(register_data.password)
+
+    dept_repo = DepartmentRepository()
+    departments = await dept_repo.list_departments()
+    default_dept = next((d for d in departments if d.name == "默认部门"), None)
+    department_id = default_dept.id if default_dept else None
+
+    new_user = await user_repo.create(
+        {
+            "username": register_data.username,
+            "user_id": user_id,
+            "phone_number": register_data.phone_number,
+            "avatar": None,
+            "password_hash": hashed_password,
+            "role": "user",
+            "department_id": department_id,
+        }
+    )
+
+    token_data = {"sub": str(new_user.id)}
+    access_token = AuthUtils.create_access_token(token_data)
+    department_name = default_dept.name if default_dept else None
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user_id": new_user.id,
+        "username": new_user.username,
+        "user_id_login": new_user.user_id,
+        "phone_number": new_user.phone_number,
+        "avatar": new_user.avatar,
+        "role": new_user.role,
+        "department_id": department_id,
+        "department_name": department_name,
     }
 
 

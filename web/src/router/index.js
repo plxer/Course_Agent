@@ -30,6 +30,12 @@ const router = createRouter({
       meta: { requiresAuth: false }
     },
     {
+      path: '/register',
+      name: 'register',
+      component: () => import('../views/RegisterView.vue'),
+      meta: { requiresAuth: false }
+    },
+    {
       path: '/agent',
       name: 'AgentMain',
       component: AppLayout,
@@ -93,24 +99,24 @@ const router = createRouter({
         }
       ]
     },
-    // 课程智能体（计算机网络等）：问答、课本伴读、视频、习题推荐
+    // 课程智能体（计算机网络等）：问答、课本伴读、视频、习题推荐（需登录）
     {
       path: '/course',
       name: 'courseHome',
       component: () => import('../views/course/ConversationView.vue'),
-      meta: { requiresAuth: false }
+      meta: { requiresAuth: true }
     },
     {
       path: '/conversation',
       name: 'courseConversation',
       component: () => import('../views/course/ConversationView.vue'),
-      meta: { requiresAuth: false }
+      meta: { requiresAuth: true }
     },
     {
       path: '/exercises',
       name: 'courseExercises',
       component: () => import('../views/course/ExercisesView.vue'),
-      meta: { requiresAuth: false }
+      meta: { requiresAuth: true }
     },
     {
       path: '/reading',
@@ -122,7 +128,7 @@ const router = createRouter({
       path: '/videos',
       name: 'courseVideos',
       component: () => import('../views/course/VideosView.vue'),
-      meta: { requiresAuth: false }
+      meta: { requiresAuth: true }
     },
     {
       path: '/:pathMatch(.*)*',
@@ -193,9 +199,9 @@ router.beforeEach(async (to, from, next) => {
     return
   }
 
-  // 如果用户已登录但访问登录页
-  if (to.path === '/login' && isLoggedIn) {
-    next('/')
+  // 如果用户已登录但访问登录/注册页
+  if ((to.path === '/login' || to.path === '/register') && isLoggedIn) {
+    next('/course')
     return
   }
 

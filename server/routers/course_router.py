@@ -71,11 +71,12 @@ async def course_chat_stream(
     db: AsyncSession = Depends(get_db),
 ):
     """课程对话流式接口：使用默认智能体，课本伴读侧边栏对话会调用此接口。"""
-    agent_id = conf.default_agent_id or ""
-    if not agent_id:
-        agents = await agent_manager.get_agents_info()
-        if agents:
-            agent_id = agents[0].get("id", "")
+    # 课程对话优先使用环境变量 DEFAULT_AGENT_ID，否则 config，否则固定 ChatbotAgent（不依赖 agents 顺序）
+    agent_id = (os.getenv("DEFAULT_AGENT_ID") or "").strip() or conf.default_agent_id or "ChatbotAgent"
+    agents = await agent_manager.get_agents_info()
+    agent_ids = [a.get("id", "") for a in agents] if agents else []
+    if agent_id not in agent_ids and agent_ids:
+        agent_id = agent_ids[0]
     if not agent_id:
         raise HTTPException(
             status_code=503,

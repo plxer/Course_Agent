@@ -344,6 +344,15 @@ async def stream_agent_chat(
     try:
         conv_repo = ConversationRepository(db)
 
+        # 若该 thread_id 尚无对话（如课程页前端自建 thread_id），先创建一条，避免 add_message_by_thread_id 落库失败
+        if await conv_repo.get_conversation_by_thread_id(thread_id) is None:
+            await conv_repo.create_conversation(
+                user_id=user_id,
+                agent_id=agent_id,
+                title="New Conversation",
+                thread_id=thread_id,
+            )
+
         try:
             await conv_repo.add_message_by_thread_id(
                 thread_id=thread_id,

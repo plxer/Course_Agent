@@ -9,6 +9,7 @@
     :placeholder="placeholder"
     :force-multi-line="hasStateContent"
     :mention="mention"
+    :show-stop-button="false"
     @send="handleSend"
     @keydown="handleKeyDown"
   >

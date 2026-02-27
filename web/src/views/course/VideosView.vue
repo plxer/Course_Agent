@@ -6,11 +6,24 @@
         <router-link to="/" class="videos-logo">
           <span class="videos-logo-text">天津大学《计算机网络》课程数智化平台</span>
         </router-link>
-        <div class="videos-nav">
-          <router-link to="/conversation" class="videos-nav-link" :class="{ active: $route.path === '/conversation' || $route.path === '/course' }">对话</router-link>
-          <router-link to="/exercises" class="videos-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
-          <router-link to="/reading" class="videos-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
-          <router-link to="/videos" class="videos-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
+        <div class="videos-right">
+          <div class="videos-nav">
+            <router-link to="/conversation" class="videos-nav-link" :class="{ active: $route.path === '/conversation' || $route.path === '/course' }">对话</router-link>
+            <router-link to="/exercises" class="videos-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
+            <router-link to="/reading" class="videos-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
+            <router-link to="/videos" class="videos-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
+          </div>
+          <div class="videos-auth">
+            <template v-if="!userStore.isLoggedIn">
+              <router-link to="/login" class="videos-auth-link">登录</router-link>
+              <router-link to="/register" class="videos-auth-link primary">注册</router-link>
+            </template>
+            <template v-else>
+              <span class="videos-username">{{ userStore.username || userStore.userIdLogin }}</span>
+              <button type="button" class="videos-auth-btn" @click="handleSwitchAccount">切换账号</button>
+              <button type="button" class="videos-auth-btn" @click="handleLogout">退出</button>
+            </template>
+          </div>
         </div>
       </div>
     </header>
@@ -108,7 +121,14 @@
 
 <script setup>
 import { ref, onMounted, computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { listVideos, getVideoUrl } from '@/apis/courseApi.js';
+import { useUserStore } from '@/stores/user';
+
+const router = useRouter();
+const userStore = useUserStore();
+const handleLogout = () => { userStore.logout(); router.push('/course'); };
+const handleSwitchAccount = () => { userStore.logout(); router.push('/login'); };
 
 const chapters = ref([]);
 const selectedChapter = ref(null);
@@ -225,6 +245,63 @@ onMounted(() => {
   font-weight: 600;
   font-size: 16px;
   white-space: nowrap;
+}
+
+.videos-right {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.videos-auth {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.videos-auth-link {
+  color: var(--gray-500);
+  text-decoration: none;
+  font-size: 14px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  transition: color 0.2s, background 0.2s;
+}
+
+.videos-auth-link:hover {
+  color: var(--primary-color);
+}
+
+.videos-auth-link.primary {
+  color: var(--white);
+  background: var(--primary-color);
+}
+
+.videos-auth-link.primary:hover {
+  background: #153e68;
+  color: var(--white);
+}
+
+.videos-username {
+  font-size: 14px;
+  color: var(--gray-600);
+  margin-right: 4px;
+}
+
+.videos-auth-btn {
+  font-size: 14px;
+  padding: 6px 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--gray-600);
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.videos-auth-btn:hover {
+  color: var(--primary-color);
+  border-color: var(--primary-color);
 }
 
 .videos-nav {

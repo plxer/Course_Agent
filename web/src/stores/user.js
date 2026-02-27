@@ -89,6 +89,41 @@ export const useUserStore = defineStore('user', () => {
     localStorage.removeItem('user_token')
   }
 
+  async function register(credentials) {
+    try {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: credentials.username,
+          password: credentials.password,
+          phone_number: credentials.phone_number || null
+        })
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.detail || '注册失败')
+      }
+
+      const data = await response.json()
+      token.value = data.access_token
+      userId.value = data.user_id
+      username.value = data.username
+      userIdLogin.value = data.user_id_login
+      phoneNumber.value = data.phone_number || ''
+      avatar.value = data.avatar || ''
+      userRole.value = data.role
+      departmentId.value = data.department_id || null
+      departmentName.value = data.department_name || ''
+      localStorage.setItem('user_token', data.access_token)
+      return true
+    } catch (error) {
+      console.error('注册错误:', error)
+      throw error
+    }
+  }
+
   async function initialize(admin) {
     try {
       const response = await fetch('/api/auth/initialize', {
@@ -372,6 +407,7 @@ export const useUserStore = defineStore('user', () => {
 
     // 方法
     login,
+    register,
     logout,
     initialize,
     checkFirstRun,

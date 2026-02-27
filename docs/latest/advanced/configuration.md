@@ -127,6 +127,9 @@ enable_reranker = true
 default_agent_id = "MyCustomAgent"
 enable_content_guard = true
 
+# 默认智能体也可通过环境变量覆盖（优先于本文件），便于课程首页等固定使用 ChatbotAgent：
+# 在 .env 中设置 DEFAULT_AGENT_ID=ChatbotAgent 或 DEFAULT_AGENT_ID=DeepAgent
+
 # 模型配置修改
 [model_names.siliconflow]
 models = [

@@ -15,6 +15,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token", auto_error=Fals
 # 公开路径列表，无需登录即可访问
 PUBLIC_PATHS = [
     r"^/api/auth/token$",  # 登录
+    r"^/api/auth/register$",  # 用户注册
     r"^/api/auth/check-first-run$",  # 检查是否首次运行
     r"^/api/auth/initialize$",  # 初始化系统
     r"^/api$",  # Health Check

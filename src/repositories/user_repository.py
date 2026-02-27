@@ -120,6 +120,12 @@ class UserRepository:
             result = await session.execute(select(User.id).where(User.phone_number == phone))
             return result.scalar_one_or_none() is not None
 
+    async def exists_by_username(self, username: str) -> bool:
+        """检查用户名是否存在（用于注册时去重）"""
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(select(User.id).where(User.username == username, User.is_deleted == 0))
+            return result.scalar_one_or_none() is not None
+
     async def count(self, department_id: int | None = None) -> int:
         """统计用户数量"""
         async with pg_manager.get_async_session_context() as session:

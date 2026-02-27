@@ -225,6 +225,10 @@ class Config(BaseModel):
         if os.getenv("TAVILY_API_KEY"):
             self.enable_web_search = True
 
+        # 默认智能体：环境变量优先于文件配置（便于课程首页等固定使用 ChatbotAgent）
+        if os.getenv("DEFAULT_AGENT_ID"):
+            self.default_agent_id = os.getenv("DEFAULT_AGENT_ID", "").strip()
+
         # 获取可用的模型提供商
         self.valuable_model_provider = [k for k, v in self.model_provider_status.items() if v]
 

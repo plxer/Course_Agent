@@ -6,11 +6,24 @@
         <router-link to="/" class="reading-logo">
           <span class="reading-logo-text">天津大学《计算机网络》课程数智化平台</span>
         </router-link>
-        <div class="reading-nav">
-          <router-link to="/conversation" class="reading-nav-link" :class="{ active: $route.path === '/conversation' || $route.path === '/course' }">对话</router-link>
-          <router-link to="/exercises" class="reading-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
-          <router-link to="/reading" class="reading-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
-          <router-link to="/videos" class="reading-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
+        <div class="reading-right">
+          <div class="reading-nav">
+            <router-link to="/conversation" class="reading-nav-link" :class="{ active: $route.path === '/conversation' || $route.path === '/course' }">对话</router-link>
+            <router-link to="/exercises" class="reading-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
+            <router-link to="/reading" class="reading-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
+            <router-link to="/videos" class="reading-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
+          </div>
+          <div class="reading-auth">
+            <template v-if="!userStore.isLoggedIn">
+              <router-link to="/login" class="reading-auth-link">登录</router-link>
+              <router-link to="/register" class="reading-auth-link primary">注册</router-link>
+            </template>
+            <template v-else>
+              <span class="reading-username">{{ userStore.username || userStore.userIdLogin }}</span>
+              <button type="button" class="reading-auth-btn" @click="handleSwitchAccount">切换账号</button>
+              <button type="button" class="reading-auth-btn" @click="handleLogout">退出</button>
+            </template>
+          </div>
         </div>
       </div>
     </header>
@@ -167,10 +180,20 @@
         <!-- 侧边栏对话面板 -->
         <div v-if="showChatPanel" class="reading-chat-panel">
           <div class="reading-chat-header">
-            <h3 class="reading-chat-title">智能对话</h3>
-            <button class="reading-chat-close" @click="showChatPanel = false">
-              <CloseOutlined />
-            </button>
+            <h3 class="reading-chat-title">智能对话{{ selectedBook ? ` · ${selectedBook.name}` : '' }}</h3>
+            <div class="reading-chat-header-actions">
+              <button
+                type="button"
+                class="reading-chat-clear-ctx-btn"
+                title="清除上下文（清空当前课本的对话，下次提问将重新开始）"
+                @click="clearBookChatContext"
+              >
+                <DeleteOutlined /> 清除上下文
+              </button>
+              <button class="reading-chat-close" @click="showChatPanel = false">
+                <CloseOutlined />
+              </button>
+            </div>
           </div>
           
           <div class="reading-chat-messages" ref="chatMessagesBox">
@@ -214,7 +237,6 @@
                   <span></span>
                   <span></span>
                 </div>
-                <button type="button" class="reading-chat-stop-btn" @click="stopChatStream" title="停止生成">停止</button>
               </div>
             </div>
           </div>
@@ -241,7 +263,7 @@
             <button 
               v-else
               type="button"
-              class="reading-chat-stop-btn-inline"
+              class="reading-chat-stop-btn"
               @click="stopChatStream"
               title="停止生成"
             >
@@ -257,10 +279,15 @@
 <script setup>
 import { ref, onMounted, computed, nextTick, h, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { LeftOutlined, RightOutlined, ArrowLeftOutlined, CommentOutlined, CloseOutlined } from '@ant-design/icons-vue';
+import { LeftOutlined, RightOutlined, ArrowLeftOutlined, CommentOutlined, CloseOutlined, DeleteOutlined } from '@ant-design/icons-vue';
 import { listBooks, getBookPages, getBookPageUrl, ocrTextSelection, courseChatStream } from '@/apis/courseApi.js';
+import { useUserStore } from '@/stores/user';
 
 const router = useRouter();
+const userStore = useUserStore();
+const handleLogout = () => { userStore.logout(); router.push('/course'); };
+const handleSwitchAccount = () => { userStore.logout(); router.push('/login'); };
+
 const books = ref([]);
 const selectedBook = ref(null);
 const currentPage = ref(1);
@@ -280,14 +307,27 @@ const isSelecting = ref(false);
 const finalSelectionPosition = ref({ left: 0, top: 0, width: 0, height: 0 });
 const isOcrProcessing = ref(false); // 防止重复 OCR 请求
 
-// 对话面板相关
+// 对话面板相关（按课本分离：每个 bookId 独立一份对话；当前展示用 chatMessages/chatThreadId 与当前课本同步）
 const showChatPanel = ref(false);
+/** bookId -> { messages: [], threadId: null }，用于切换课本时恢复 */
+const bookChats = ref({});
+
+function getBookChat(bookId) {
+  if (!bookId) return { messages: [], threadId: null };
+  if (!bookChats.value[bookId]) {
+    bookChats.value[bookId] = { messages: [], threadId: null };
+  }
+  return bookChats.value[bookId];
+}
+
+/** 当前展示的消息列表（与当前选中课本的 getBookChat(selectedBook.id).messages 同一引用） */
 const chatMessages = ref([]);
+const chatThreadId = ref(null);
+
 const chatInputMessage = ref('');
 const isChatLoading = ref(false);
 const chatMessagesBox = ref(null);
 const chatTextarea = ref(null);
-const chatThreadId = ref(null);
 const currentChatMessage = ref('');
 const chatStreamController = ref(null);
 
@@ -389,7 +429,9 @@ const selectBook = async (book) => {
   selectedBook.value = book;
   currentPage.value = 1;
   selectedText.value = '';
-  
+  const chat = getBookChat(book.id);
+  chatMessages.value = chat.messages;
+  chatThreadId.value = chat.threadId ?? null;
   try {
     const response = await getBookPages(book.id);
     totalPages.value = response.page_count || 0;
@@ -748,6 +790,17 @@ const sendToConversation = async (e) => {
   }, 500); // 增加延迟时间到 500ms
 };
 
+// 清除当前课本的对话上下文（下次提问将使用新 thread）
+const clearBookChatContext = () => {
+  const book = selectedBook.value;
+  if (!book) return;
+  const chat = getBookChat(book.id);
+  chat.messages = [];
+  chat.threadId = null;
+  chatMessages.value = chat.messages;
+  chatThreadId.value = null;
+};
+
 // 发送对话消息
 const sendChatMessage = async () => {
   const content = chatInputMessage.value.trim();
@@ -763,8 +816,16 @@ const sendChatMessage = async () => {
     return;
   }
 
+  const book = selectedBook.value;
+  if (!book) return;
+  const chat = getBookChat(book.id);
+  // 确保当前展示的是当前课本的 messages 引用
+  if (chatMessages.value !== chat.messages) {
+    chatMessages.value = chat.messages;
+  }
+
   // 添加用户消息
-  chatMessages.value.push({ role: 'user', content });
+  chat.messages.push({ role: 'user', content });
   const messageToSend = content; // 保存要发送的内容
   chatInputMessage.value = '';
   
@@ -778,14 +839,18 @@ const sendChatMessage = async () => {
   chatStreamController.value = new AbortController();
 
   try {
-    console.log('开始调用 courseChatStream, message:', messageToSend, 'threadId:', chatThreadId.value);
+    console.log('开始调用 courseChatStream, message:', messageToSend, 'threadId:', chat.threadId ?? chatThreadId.value);
     await courseChatStream(
       messageToSend,
-      chatThreadId.value,
+      chat.threadId ?? chatThreadId.value,
       async (chunk) => {
       console.log('收到 chunk:', chunk);
       if (chunk.status === 'init') {
-        chatThreadId.value = (chunk.meta && chunk.meta.thread_id) ? chunk.meta.thread_id : chunk.thread_id;
+        const tid = (chunk.meta && chunk.meta.thread_id) ? chunk.meta.thread_id : chunk.thread_id;
+        if (tid) {
+          chat.threadId = tid;
+          chatThreadId.value = tid;
+        }
       } else if (chunk.status === 'loading' && chunk.response !== undefined) {
         // 追加增量内容
         if (chunk.response) {
@@ -795,13 +860,13 @@ const sendChatMessage = async () => {
         scrollChatToBottom();
       } else if (chunk.status === 'finished') {
         if (currentChatMessage.value) {
-          chatMessages.value.push({ role: 'ai', content: currentChatMessage.value });
+          chat.messages.push({ role: 'ai', content: currentChatMessage.value });
           currentChatMessage.value = '';
         }
         isChatLoading.value = false;
         scrollChatToBottom();
       } else if (chunk.status === 'error') {
-        chatMessages.value.push({ role: 'ai', content: chunk.error_message || chunk.message || '抱歉，连接服务器失败，请检查网络或稍后再试。' });
+        chat.messages.push({ role: 'ai', content: chunk.error_message || chunk.message || '抱歉，连接服务器失败，请检查网络或稍后再试。' });
         isChatLoading.value = false;
         scrollChatToBottom();
       }
@@ -811,12 +876,12 @@ const sendChatMessage = async () => {
   } catch (error) {
     if (error.name === 'AbortError') {
       if (currentChatMessage.value) {
-        chatMessages.value.push({ role: 'ai', content: currentChatMessage.value });
+        chat.messages.push({ role: 'ai', content: currentChatMessage.value });
         currentChatMessage.value = '';
       }
     } else {
       console.error('发送消息失败:', error);
-      chatMessages.value.push({ role: 'ai', content: '抱歉，连接服务器失败，请检查网络或稍后再试。' });
+      chat.messages.push({ role: 'ai', content: '抱歉，连接服务器失败，请检查网络或稍后再试。' });
     }
     isChatLoading.value = false;
     chatStreamController.value = null;
@@ -908,6 +973,63 @@ onMounted(() => {
   font-weight: 600;
   font-size: 16px;
   white-space: nowrap;
+}
+
+.reading-right {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.reading-auth {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.reading-auth-link {
+  color: var(--gray-500);
+  text-decoration: none;
+  font-size: 14px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  transition: color 0.2s, background 0.2s;
+}
+
+.reading-auth-link:hover {
+  color: var(--primary-color);
+}
+
+.reading-auth-link.primary {
+  color: var(--white);
+  background: var(--primary-color);
+}
+
+.reading-auth-link.primary:hover {
+  background: #153e68;
+  color: var(--white);
+}
+
+.reading-username {
+  font-size: 14px;
+  color: var(--gray-600);
+  margin-right: 4px;
+}
+
+.reading-auth-btn {
+  font-size: 14px;
+  padding: 6px 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--gray-600);
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.reading-auth-btn:hover {
+  color: var(--primary-color);
+  border-color: var(--primary-color);
 }
 
 .reading-nav {
@@ -1333,6 +1455,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 16px;
   border-bottom: 1px solid var(--gray-200);
 }
@@ -1342,6 +1465,36 @@ onMounted(() => {
   font-weight: 600;
   color: var(--primary-color);
   margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reading-chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.reading-chat-clear-ctx-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--gray-600);
+  background: transparent;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.reading-chat-clear-ctx-btn:hover {
+  color: var(--primary-color);
+  border-color: var(--primary-color);
 }
 
 .reading-chat-close {
@@ -1471,19 +1624,21 @@ onMounted(() => {
   border-top: 1px solid var(--gray-200);
   display: flex;
   gap: 12px;
-  align-items: flex-end;
+  align-items: center;
   background-color: var(--white);
+  box-sizing: border-box;
 }
 
 .reading-chat-textarea {
   flex: 1;
+  box-sizing: border-box;
   padding: 12px 16px;
   border: 1px solid var(--gray-300);
   border-radius: 8px;
   font-size: 14px;
   font-family: inherit;
   resize: none;
-  min-height: 44px;
+  min-height: 60px;
   max-height: 200px;
   line-height: 1.5;
   overflow-y: auto;
@@ -1494,17 +1649,29 @@ onMounted(() => {
   border-color: var(--primary-color);
 }
 
+.reading-chat-send-btn,
+.reading-chat-stop-btn {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: auto;
+  height: 60px;
+  min-height: 60px;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 .reading-chat-send-btn {
   background-color: var(--primary-color);
   color: var(--white);
-  border: none;
-  padding: 12px 24px;
+  border: 1px solid var(--primary-color);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
   transition: background-color 0.3s ease;
-  white-space: nowrap;
 }
 
 .reading-chat-send-btn:hover:not(:disabled) {
@@ -1516,27 +1683,18 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
-.reading-chat-stop-btn,
-.reading-chat-stop-btn-inline {
+.reading-chat-stop-btn {
   background-color: var(--gray-200);
   color: var(--gray-600);
   border: 1px solid var(--gray-200);
-  padding: 6px 12px;
   border-radius: 6px;
-  font-size: 13px;
   cursor: pointer;
-  margin-top: 8px;
+  transition: background-color 0.2s ease;
 }
 
-.reading-chat-stop-btn:hover,
-.reading-chat-stop-btn-inline:hover {
+.reading-chat-stop-btn:hover {
   background-color: #d1d5db;
   color: var(--dark-text);
-}
-
-.reading-chat-stop-btn-inline {
-  margin-top: 0;
-  padding: 12px 24px;
 }
 
 @media (max-width: 768px) {

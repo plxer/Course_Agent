@@ -35,6 +35,7 @@ export async function courseChatStream(query, threadId = null, onChunk = null, o
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let gotTerminal = false
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
@@ -45,12 +46,15 @@ export async function courseChatStream(query, threadId = null, onChunk = null, o
       if (!line.trim()) continue
       try {
         const data = JSON.parse(line)
+        if (data.status === 'finished' || data.status === 'error') gotTerminal = true
         if (onChunk) onChunk(data)
       } catch (e) {
         console.error('Parse chunk error:', e, line)
       }
     }
   }
+  // 流结束但未收到 finished/error 时也结束加载，避免一直转圈
+  if (onChunk && !gotTerminal) onChunk({ status: 'finished' })
 }
 
 /** 课本列表（可匿名） */

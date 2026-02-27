@@ -6,11 +6,24 @@
         <router-link to="/" class="exercises-logo">
           <span class="exercises-logo-text">天津大学《计算机网络》课程数智化平台</span>
         </router-link>
-        <div class="exercises-nav">
-          <router-link to="/conversation" class="exercises-nav-link" :class="{ active: $route.path === '/conversation' || $route.path === '/course' }">对话</router-link>
-          <router-link to="/exercises" class="exercises-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
-          <router-link to="/reading" class="exercises-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
-          <router-link to="/videos" class="exercises-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
+        <div class="exercises-right">
+          <div class="exercises-nav">
+            <router-link to="/conversation" class="exercises-nav-link" :class="{ active: $route.path === '/conversation' || $route.path === '/course' }">对话</router-link>
+            <router-link to="/exercises" class="exercises-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
+            <router-link to="/reading" class="exercises-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
+            <router-link to="/videos" class="exercises-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
+          </div>
+          <div class="exercises-auth">
+            <template v-if="!userStore.isLoggedIn">
+              <router-link to="/login" class="exercises-auth-link">登录</router-link>
+              <router-link to="/register" class="exercises-auth-link primary">注册</router-link>
+            </template>
+            <template v-else>
+              <span class="exercises-username">{{ userStore.username || userStore.userIdLogin }}</span>
+              <button type="button" class="exercises-auth-btn" @click="handleSwitchAccount">切换账号</button>
+              <button type="button" class="exercises-auth-btn" @click="handleLogout">退出</button>
+            </template>
+          </div>
         </div>
       </div>
     </header>
@@ -73,7 +86,13 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { RouterLink } from 'vue-router'
+import { useRouter, RouterLink } from 'vue-router'
+import { useUserStore } from '@/stores/user'
+
+const router = useRouter()
+const userStore = useUserStore()
+const handleLogout = () => { userStore.logout(); router.push('/course') }
+const handleSwitchAccount = () => { userStore.logout(); router.push('/login') }
 
 // 按章节出题：计算机网络 第1–6章
 const chapters = [
@@ -172,6 +191,63 @@ onMounted(() => {
   font-weight: 600;
   font-size: 16px;
   white-space: nowrap;
+}
+
+.exercises-right {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.exercises-auth {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.exercises-auth-link {
+  color: var(--gray-500);
+  text-decoration: none;
+  font-size: 14px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  transition: color 0.2s, background 0.2s;
+}
+
+.exercises-auth-link:hover {
+  color: var(--primary-color);
+}
+
+.exercises-auth-link.primary {
+  color: var(--white);
+  background: var(--primary-color);
+}
+
+.exercises-auth-link.primary:hover {
+  background: #153e68;
+  color: var(--white);
+}
+
+.exercises-username {
+  font-size: 14px;
+  color: var(--gray-600);
+  margin-right: 4px;
+}
+
+.exercises-auth-btn {
+  font-size: 14px;
+  padding: 6px 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--gray-600);
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.exercises-auth-btn:hover {
+  color: var(--primary-color);
+  border-color: var(--primary-color);
 }
 
 .exercises-nav {

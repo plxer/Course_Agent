@@ -5,11 +5,24 @@
         <router-link to="/" class="conversation-view-logo">
           <span class="conversation-view-logo-text">天津大学《计算机网络》课程数智化平台</span>
         </router-link>
-        <div class="conversation-view-nav">
-          <router-link to="/conversation" class="conversation-view-nav-link" :class="{ active: $route.path === '/conversation' || $route.path === '/course' }">对话</router-link>
-          <router-link to="/exercises" class="conversation-view-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
-          <router-link to="/reading" class="conversation-view-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
-          <router-link to="/videos" class="conversation-view-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
+        <div class="conversation-view-right">
+          <div class="conversation-view-nav">
+            <router-link to="/conversation" class="conversation-view-nav-link" :class="{ active: $route.path === '/conversation' || $route.path === '/course' }">对话</router-link>
+            <router-link to="/exercises" class="conversation-view-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
+            <router-link to="/reading" class="conversation-view-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
+            <router-link to="/videos" class="conversation-view-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
+          </div>
+          <div class="conversation-view-auth">
+            <template v-if="!userStore.isLoggedIn">
+              <router-link to="/login" class="conversation-view-auth-link">登录</router-link>
+              <router-link to="/register" class="conversation-view-auth-link primary">注册</router-link>
+            </template>
+            <template v-else>
+              <span class="conversation-view-username">{{ userStore.username || userStore.userIdLogin }}</span>
+              <button type="button" class="conversation-view-auth-btn" @click="handleSwitchAccount">切换账号</button>
+              <button type="button" class="conversation-view-auth-btn" @click="handleLogout">退出</button>
+            </template>
+          </div>
         </div>
       </div>
     </header>
@@ -22,14 +35,11 @@
         <div class="conversation-view-sidebar">
           <div class="conversation-sidebar-header">
             <h3 class="conversation-sidebar-title">对话列表</h3>
-            <button class="conversation-sidebar-new-btn" @click="createNewChat">
-              <i class="fa fa-plus"></i>
+            <button type="button" class="conversation-sidebar-new-btn" @click="createNewChat" title="新建对话">
+              <i class="fa fa-plus"></i> 新建对话
             </button>
           </div>
           <div class="conversation-sidebar-content">
-            <button class="new-chat-btn" @click="createNewChat">
-              <i class="fa fa-plus"></i> 新建对话
-            </button>
             <div class="conversation-list">
               <div 
                 v-for="(chat, index) in chatList" 
@@ -79,8 +89,8 @@
             </div>
           </div>
 
-          <!-- 加载中状态 -->
-          <div v-if="isLoading" class="conversation-view-message-item">
+          <!-- 加载中状态（仅当前发起请求的对话显示） -->
+          <div v-if="isLoading && currentChatId === activeRequestChatId" class="conversation-view-message-item">
             <div class="conversation-view-message-avatar ai" title="AI 助手">
               <svg class="avatar-robot" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h2v1h2v2h2v2h1c.55 0 1 .45 1 1v2h1v2h-1v2H4v-2H3v-2h1v-2c0-.55.45-1 1-1h1v-2h2V8h2V7h2V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M8 18h8v-2H8v2m-1-5h2v2H7v-2m8 0v2h-2v-2h2m-3-3h2v2h-2v-2m-4 0v2H7v-2h2z"/></svg>
             </div>
@@ -91,9 +101,6 @@
                 <span></span>
                 <span></span>
               </div>
-              <button type="button" class="conversation-view-stop-btn" @click="stopStream" title="停止生成">
-                <i class="fa fa-stop"></i> 停止
-              </button>
             </div>
           </div>
         </div>
@@ -110,17 +117,17 @@
               @keydown.enter.shift.exact="handleShiftEnter"
             ></textarea>
             <button 
-              v-if="!isLoading"
+              v-if="!isLoading || currentChatId !== activeRequestChatId"
               class="conversation-view-send-btn" 
               @click="sendMessage"
-              :disabled="!inputMessage.trim()"
+              :disabled="!inputMessage.trim() || isLoading"
             >
               <i class="fa fa-paper-plane mr-2"></i>发送
             </button>
             <button 
               v-else
               type="button"
-              class="conversation-view-stop-btn-inline"
+              class="conversation-view-stop-btn"
               @click="stopStream"
               title="停止生成"
             >
@@ -134,63 +141,148 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, watch } from 'vue';
+import { ref, onMounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
-import { agentApi } from '@/apis/agent_api.js';
+import { courseChatStream } from '@/apis/courseApi.js';
+import { agentApi, threadApi } from '@/apis';
 import { useUserStore } from '@/stores/user';
 
 const router = useRouter();
 const userStore = useUserStore();
 const inputMessage = ref('');
+
+const handleLogout = () => {
+  userStore.logout();
+  router.push('/course');
+};
+const handleSwitchAccount = () => {
+  userStore.logout();
+  router.push('/login');
+};
 const messages = ref([]);
 const isLoading = ref(false);
 const messageBox = ref(null);
 const inputTextarea = ref(null);
 const threadId = ref(null);
 const currentAiMessage = ref('');
-const defaultAgentId = ref(null);
 const streamController = ref(null);
 
 // 对话列表相关
 const chatList = ref([]);
 const currentChatId = ref(null);
+/** 新建对话序号（删除不影响已有对话的序号） */
+const nextChatNumber = ref(1);
+/** 当前正在收流的对话 id，用于仅在该对话中显示加载和追加回复 */
+const activeRequestChatId = ref(null);
+/** 课程使用的默认智能体 id，与后端 /course/chat/stream 一致，用于拉取/创建 thread */
+const defaultAgentId = ref(null);
 
-// 创建新对话
-const createNewChat = () => {
+// 用首条用户消息生成简短标题（首轮对话后调用），并同步到后端
+const summarizeChatTitle = (chat) => {
+  const userMsg = chat.messages?.find(m => m.role === 'user');
+  if (!userMsg?.content) return;
+  const text = userMsg.content.trim();
+  const maxLen = 20;
+  chat.title = text.length <= maxLen ? text : text.slice(0, maxLen) + '…';
+  if (userStore.isLoggedIn && defaultAgentId.value && chat.id) {
+    threadApi.updateThread(chat.id, chat.title).catch((err) => console.error('更新对话标题失败:', err));
+  }
+};
+
+// 从后端历史记录格式转为页面使用的 messages
+function historyToMessages(history) {
+  if (!Array.isArray(history)) return [];
+  return history
+    .filter((m) => m.type === 'human' || m.type === 'ai')
+    .map((m) => ({ role: m.type === 'human' ? 'user' : 'ai', content: m.content || '' }));
+}
+
+// 加载指定 thread 的历史并填入 chat.messages
+async function loadThreadHistory(chat) {
+  if (!defaultAgentId.value || !chat.id) return;
+  try {
+    const res = await agentApi.getAgentHistory(defaultAgentId.value, chat.id);
+    const list = res?.history ? historyToMessages(res.history) : [];
+    chat.messages = list;
+  } catch (err) {
+    console.error('加载对话历史失败:', err);
+    chat.messages = chat.messages || [];
+  }
+}
+
+// 创建新对话（已登录时调用后端创建 thread 并加入列表）
+const createNewChat = async () => {
+  if (userStore.isLoggedIn && defaultAgentId.value) {
+    try {
+      const title = `对话 ${nextChatNumber.value}`;
+      nextChatNumber.value += 1;
+      const thread = await threadApi.createThread(defaultAgentId.value, title);
+      const newChat = {
+        id: thread.id,
+        title: thread.title || title,
+        messages: [],
+        threadId: thread.id
+      };
+      chatList.value.push(newChat);
+      switchChat(newChat.id);
+    } catch (err) {
+      console.error('创建对话失败:', err);
+      createNewChatLocal();
+    }
+  } else {
+    createNewChatLocal();
+  }
+};
+
+function createNewChatLocal() {
   const newChat = {
     id: Date.now().toString(),
-    title: `对话 ${chatList.value.length + 1}`,
+    title: `对话 ${nextChatNumber.value}`,
     messages: [],
     threadId: null
   };
+  nextChatNumber.value += 1;
   chatList.value.push(newChat);
   switchChat(newChat.id);
-};
+}
 
-// 切换对话
-const switchChat = (chatId) => {
-  const chat = chatList.value.find(c => c.id === chatId);
+// 切换对话（已登录时从后端拉取该 thread 的历史）
+const switchChat = async (chatId) => {
+  const chat = chatList.value.find((c) => c.id === chatId);
   if (!chat) return;
-  
+
   currentChatId.value = chatId;
-  messages.value = chat.messages || [];
-  threadId.value = chat.threadId || null;
+  threadId.value = chat.threadId ?? chat.id;
   inputMessage.value = '';
-  
+
+  if (userStore.isLoggedIn && defaultAgentId.value) {
+    if (chat.messages.length === 0) await loadThreadHistory(chat);
+    messages.value = chat.messages || [];
+  } else {
+    messages.value = chat.messages || [];
+  }
+
   nextTick(() => {
     scrollToBottom();
     adjustTextareaHeight();
   });
 };
 
-// 删除对话
-const deleteChat = (chatId) => {
-  const index = chatList.value.findIndex(c => c.id === chatId);
+// 删除对话（已登录时同时删除后端 thread）
+const deleteChat = async (chatId) => {
+  const index = chatList.value.findIndex((c) => c.id === chatId);
   if (index === -1) return;
-  
+
+  if (userStore.isLoggedIn && defaultAgentId.value) {
+    try {
+      await threadApi.deleteThread(chatId);
+    } catch (err) {
+      console.error('删除对话失败:', err);
+    }
+  }
+
   chatList.value.splice(index, 1);
-  
-  // 如果删除的是当前对话，切换到其他对话或创建新对话
+
   if (currentChatId.value === chatId) {
     if (chatList.value.length > 0) {
       switchChat(chatList.value[0].id);
@@ -200,142 +292,88 @@ const deleteChat = (chatId) => {
   }
 };
 
-// 获取默认智能体ID
-const loadDefaultAgent = async () => {
-  try {
-    const response = await agentApi.getDefaultAgent();
-    defaultAgentId.value = response.default_agent_id;
-    console.log('默认智能体ID:', defaultAgentId.value);
-  } catch (error) {
-    console.error('获取默认智能体失败:', error);
-    // 如果获取失败，尝试使用 ChatbotAgent 作为默认值
-    defaultAgentId.value = 'ChatbotAgent';
-  }
-};
-
-// 发送消息
+// 发送消息（使用课程对话流接口，由后端根据 DEFAULT_AGENT_ID 决定智能体，固定为 ChatbotAgent）
 const sendMessage = async () => {
   const content = inputMessage.value.trim();
   if (!content || isLoading.value) return;
 
-  // 如果没有默认智能体ID，先获取
-  if (!defaultAgentId.value) {
-    await loadDefaultAgent();
-  }
+  const chatIdForThisRequest = currentChatId.value;
+  const chat = chatList.value.find(c => c.id === chatIdForThisRequest);
+  if (!chat) return;
 
-  if (!defaultAgentId.value) {
-    messages.value.push({ role: 'ai', content: '无法获取智能体配置，请稍后再试。' });
-    return;
-  }
-
-  // 添加用户消息
-  messages.value.push({ role: 'user', content });
+  activeRequestChatId.value = chatIdForThisRequest;
+  chat.messages.push({ role: 'user', content });
   inputMessage.value = '';
-  
-  // 滚动到底部
   await nextTick();
   scrollToBottom();
 
-  // 设置加载状态并创建可中止的请求
   isLoading.value = true;
   currentAiMessage.value = '';
   streamController.value = new AbortController();
 
   try {
-    // 生成或使用 thread_id
     if (!threadId.value) {
-      threadId.value = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+      threadId.value = chat.threadId || chat.id || Date.now().toString() + Math.random().toString(36).substr(2, 9);
     }
+    chat.threadId = threadId.value;
 
-    // 使用通用对话API（传入 signal 以支持停止）
-    const response = await agentApi.sendAgentMessage(
-      defaultAgentId.value,
-      { query: content, config: { thread_id: threadId.value } },
+    await courseChatStream(
+      content,
+      threadId.value,
+      (chunk) => {
+        const targetChat = chatList.value.find(c => c.id === chatIdForThisRequest);
+        if (!targetChat) return;
+
+        if (chunk.status === 'init') {
+          const tid = (chunk.meta && chunk.meta.thread_id) ? chunk.meta.thread_id : chunk.thread_id;
+          if (tid) {
+            threadId.value = tid;
+            targetChat.threadId = tid;
+          }
+        } else if (chunk.status === 'loading' && chunk.response !== undefined) {
+          if (chunk.response) {
+            currentAiMessage.value = (currentAiMessage.value || '') + chunk.response;
+          }
+          if (currentChatId.value === chatIdForThisRequest) nextTick(() => scrollToBottom());
+        } else if (chunk.status === 'finished') {
+          if (currentAiMessage.value) {
+            targetChat.messages.push({ role: 'ai', content: currentAiMessage.value });
+            if (targetChat.messages.length === 2) summarizeChatTitle(targetChat);
+            currentAiMessage.value = '';
+          }
+          isLoading.value = false;
+          activeRequestChatId.value = null;
+          if (currentChatId.value === chatIdForThisRequest) nextTick(() => scrollToBottom());
+        } else if (chunk.status === 'error') {
+          const errMsg = chunk.error_message || chunk.message || '抱歉，连接服务器失败，请检查网络或稍后再试。';
+          targetChat.messages.push({ role: 'ai', content: errMsg });
+          isLoading.value = false;
+          currentAiMessage.value = '';
+          activeRequestChatId.value = null;
+          if (currentChatId.value === chatIdForThisRequest) nextTick(() => scrollToBottom());
+        }
+      },
       { signal: streamController.value.signal }
     );
-
-    if (!response.ok) {
-      let errMsg = '抱歉，连接服务器失败，请检查网络或稍后再试。';
-      if (response.status === 401) {
-        errMsg = '请先登录后再使用问答功能。若已打开登录页，请完成登录后重试。';
-      } else if (response.status === 503) {
-        try {
-          const d = await response.json();
-          errMsg = d.detail || errMsg;
-        } catch (_) {}
-      } else if (response.status >= 500) {
-        errMsg = '服务暂时不可用，请稍后再试。';
-      }
-      messages.value.push({ role: 'ai', content: errMsg });
-      isLoading.value = false;
-      streamController.value = null;
-      await nextTick();
-      scrollToBottom();
-      return;
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.trim()) {
-          try {
-            const chunk = JSON.parse(line);
-            console.log('收到 chunk:', chunk);
-            
-            if (chunk.status === 'init') {
-              const tid = (chunk.meta && chunk.meta.thread_id) ? chunk.meta.thread_id : chunk.thread_id;
-              if (tid) threadId.value = tid;
-            } else if (chunk.status === 'loading' && chunk.response !== undefined) {
-              // 追加增量内容
-              if (chunk.response) {
-                currentAiMessage.value = (currentAiMessage.value || '') + chunk.response;
-              }
-              await nextTick();
-              scrollToBottom();
-            } else if (chunk.status === 'finished') {
-              if (currentAiMessage.value) {
-                messages.value.push({ role: 'ai', content: currentAiMessage.value });
-                currentAiMessage.value = '';
-              }
-              isLoading.value = false;
-              scrollToBottom();
-            } else if (chunk.status === 'error') {
-              const errMsg = chunk.error_message || chunk.message || '抱歉，连接服务器失败，请检查网络或稍后再试。';
-              messages.value.push({ role: 'ai', content: errMsg });
-              isLoading.value = false;
-              scrollToBottom();
-            }
-          } catch (e) {
-            console.error('Failed to parse chunk:', e, 'Line:', line);
-          }
-        }
-      }
-    }
   } catch (error) {
-    if (error.name === 'AbortError') {
-      if (currentAiMessage.value) {
-        messages.value.push({ role: 'ai', content: currentAiMessage.value });
-        currentAiMessage.value = '';
+    const targetChat = chatList.value.find(c => c.id === chatIdForThisRequest);
+    if (targetChat) {
+      if (error.name === 'AbortError') {
+        if (currentAiMessage.value) {
+          targetChat.messages.push({ role: 'ai', content: currentAiMessage.value });
+          if (targetChat.messages.length === 2) summarizeChatTitle(targetChat);
+        }
+      } else {
+        console.error('发送消息失败:', error);
+        const networkMsg = '无法连接服务器，请确认：1) 后端服务已启动；2) 浏览器访问的地址已正确代理到后端（如 localhost:5173 的 /api 会转发到后端）。若未登录，请先登录。';
+        targetChat.messages.push({ role: 'ai', content: networkMsg });
       }
-    } else {
-      console.error('发送消息失败:', error);
-      const networkMsg = '无法连接服务器，请确认：1) 后端服务已启动；2) 浏览器访问的地址已正确代理到后端（如 localhost:5173 的 /api 会转发到后端）。若未登录，请先登录。';
-      messages.value.push({ role: 'ai', content: networkMsg });
     }
+    currentAiMessage.value = '';
     isLoading.value = false;
+    activeRequestChatId.value = null;
     streamController.value = null;
-    await nextTick();
-    scrollToBottom();
+    if (currentChatId.value === chatIdForThisRequest) await nextTick(() => scrollToBottom());
   }
 };
 
@@ -345,26 +383,47 @@ const stopStream = () => {
   }
 };
 
-// 监听消息变化，保存到对话列表
-watch(() => messages.value, (newMessages) => {
-  if (currentChatId.value) {
-    const chat = chatList.value.find(c => c.id === currentChatId.value);
-    if (chat) {
-      chat.messages = [...newMessages];
-      chat.threadId = threadId.value;
-    }
-  }
-}, { deep: true });
-
-// 初始化时创建第一个对话并加载默认智能体
+// 初始化：已登录时从后端拉取对话列表并选中第一个；未登录时仅创建本地对话
 onMounted(async () => {
-  if (chatList.value.length === 0) createNewChat();
-  await loadDefaultAgent();
   if (!document.querySelector('link[href*="font-awesome"]')) {
     const link = document.createElement('link');
     link.href = 'https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css';
     link.rel = 'stylesheet';
     document.head.appendChild(link);
+  }
+
+  if (!userStore.isLoggedIn) {
+    if (chatList.value.length === 0) createNewChat();
+    return;
+  }
+
+  try {
+    const defaultRes = await agentApi.getDefaultAgent();
+    const agentId = defaultRes?.default_agent_id;
+    if (!agentId) {
+      if (chatList.value.length === 0) createNewChatLocal();
+      return;
+    }
+    defaultAgentId.value = agentId;
+
+    const threads = await threadApi.getThreads(agentId);
+    const list = Array.isArray(threads) ? threads : [];
+    chatList.value = list.map((t) => ({
+      id: t.id,
+      title: t.title || `对话 ${t.id}`,
+      messages: [],
+      threadId: t.id
+    }));
+    nextChatNumber.value = chatList.value.length + 1;
+
+    if (chatList.value.length > 0) {
+      await switchChat(chatList.value[0].id);
+    } else {
+      createNewChat();
+    }
+  } catch (err) {
+    console.error('加载课程对话列表失败:', err);
+    if (chatList.value.length === 0) createNewChatLocal();
   }
 });
 
@@ -457,10 +516,67 @@ const scrollToBottom = () => {
   height: 22px;
 }
 
+.conversation-view-right {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
 .conversation-view-nav {
   display: flex;
   align-items: center;
   gap: 24px;
+}
+
+.conversation-view-auth {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.conversation-view-auth-link {
+  color: var(--gray-500);
+  text-decoration: none;
+  font-size: 14px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  transition: color 0.2s, background 0.2s;
+}
+
+.conversation-view-auth-link:hover {
+  color: var(--primary-color);
+}
+
+.conversation-view-auth-link.primary {
+  color: var(--white);
+  background: var(--primary-color);
+}
+
+.conversation-view-auth-link.primary:hover {
+  background: #153e68;
+  color: var(--white);
+}
+
+.conversation-view-username {
+  font-size: 14px;
+  color: var(--gray-600);
+  margin-right: 4px;
+}
+
+.conversation-view-auth-btn {
+  font-size: 14px;
+  padding: 6px 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--gray-600);
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.conversation-view-auth-btn:hover {
+  color: var(--primary-color);
+  border-color: var(--primary-color);
 }
 
 .conversation-view-nav-link {
@@ -528,17 +644,23 @@ const scrollToBottom = () => {
 }
 
 .conversation-sidebar-new-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--primary-color);
-  padding: 4px 8px;
-  font-size: 16px;
-  transition: color 0.3s ease;
+  background: transparent;
+  border: 1px solid var(--primary-color);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.2s ease, background-color 0.2s ease;
 }
 
 .conversation-sidebar-new-btn:hover {
-  color: var(--secondary-color);
+  color: var(--white);
+  background-color: var(--primary-color);
 }
 
 .conversation-sidebar-content {
@@ -546,27 +668,6 @@ const scrollToBottom = () => {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-}
-
-.new-chat-btn {
-  margin: 12px;
-  padding: 10px 16px;
-  background-color: var(--primary-color);
-  color: var(--white);
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  transition: background-color 0.3s ease;
-}
-
-.new-chat-btn:hover {
-  background-color: #153e68;
 }
 
 .conversation-list {
@@ -755,15 +856,17 @@ const scrollToBottom = () => {
 /* 输入区域 */
 .conversation-view-input-area {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 0;
   padding: 16px 24px;
   border-top: 1px solid var(--gray-200);
   background-color: var(--white);
+  box-sizing: border-box;
 }
 
 .conversation-view-textarea {
   flex: 1;
+  box-sizing: border-box;
   border: 1px solid var(--gray-200);
   border-right: none;
   border-bottom-left-radius: 8px;
@@ -773,7 +876,7 @@ const scrollToBottom = () => {
   resize: none;
   font-family: inherit;
   transition: all 0.3s ease;
-  min-height: 44px;
+  min-height: 60px;
   max-height: 200px;
   overflow-y: auto;
   line-height: 1.5;
@@ -785,20 +888,43 @@ const scrollToBottom = () => {
   box-shadow: 0 0 0 2px rgba(26, 54, 93, 0.1);
 }
 
-.conversation-view-send-btn {
-  background-color: var(--primary-color);
-  color: var(--white);
-  border: none;
-  padding: 12px 24px;
+.conversation-view-send-btn,
+.conversation-view-stop-btn {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: auto;
+  height: 60px;
+  min-height: 60px;
   border-bottom-right-radius: 8px;
   border-top-right-radius: 8px;
-  font-size: 16px;
-  cursor: pointer;
-  transition: background-color 0.3s ease;
-  height: 60px;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.conversation-view-send-btn {
+  background-color: var(--primary-color);
+  color: var(--white);
+  border: 1px solid var(--primary-color);
+  padding: 0 24px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.conversation-view-stop-btn {
+  background-color: var(--gray-200);
+  color: var(--gray-600);
+  border: 1px solid var(--gray-200);
+  padding: 0 24px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.conversation-view-stop-btn:hover {
+  background-color: #d1d5db;
+  color: var(--dark-text);
 }
 
 .conversation-view-send-btn:hover:not(:disabled) {
@@ -807,36 +933,8 @@ const scrollToBottom = () => {
 
 .conversation-view-send-btn:disabled {
   background-color: var(--gray-200);
+  border-color: var(--gray-200);
   cursor: not-allowed;
-}
-
-.conversation-view-stop-btn,
-.conversation-view-stop-btn-inline {
-  background-color: var(--gray-200);
-  color: var(--gray-600);
-  border: 1px solid var(--gray-200);
-  padding: 8px 14px;
-  border-radius: 8px;
-  font-size: 14px;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.conversation-view-stop-btn:hover,
-.conversation-view-stop-btn-inline:hover {
-  background-color: #d1d5db;
-  color: var(--dark-text);
-}
-
-.conversation-view-stop-btn-inline {
-  margin-top: 0;
-  height: 60px;
-  border-bottom-right-radius: 8px;
-  border-top-right-radius: 8px;
 }
 
 /* 常见问题 */
@@ -959,7 +1057,8 @@ const scrollToBottom = () => {
     font-size: 14px;
   }
   
-  .conversation-view-send-btn {
+  .conversation-view-send-btn,
+  .conversation-view-stop-btn {
     font-size: 14px;
     padding: 12px 16px;
   }

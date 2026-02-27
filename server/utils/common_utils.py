@@ -10,10 +10,23 @@ from src.storage.postgres.models_business import OperationLog, User
 
 def setup_logging():
     """配置应用程序日志格式"""
+    # 将「连接归还时被取消」的 ERROR 降为 DEBUG，避免长请求（如流式聊天）结束时的无害竞态刷屏
+    class SuppressPoolCancelErrorFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            if record.levelno != logging.ERROR:
+                return True
+            msg = record.getMessage() or ""
+            if "Exception terminating connection" in msg:
+                record.levelno = logging.DEBUG
+                record.levelname = "DEBUG"
+            return True
+
     # 配置日志格式
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S", force=True
     )
+    for h in logging.root.handlers:
+        h.addFilter(SuppressPoolCancelErrorFilter())
 
     # 确保uvicorn的日志也使用相同格式
     uvicorn_logger = logging.getLogger("uvicorn")

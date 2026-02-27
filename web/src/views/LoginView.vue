@@ -239,7 +239,6 @@ import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useInfoStore } from '@/stores/info'
-import { useAgentStore } from '@/stores/agent'
 import { message } from 'ant-design-vue'
 import { healthApi } from '@/apis/system_api'
 import {
@@ -253,7 +252,6 @@ import {
 const router = useRouter()
 const userStore = useUserStore()
 const infoStore = useInfoStore()
-const agentStore = useAgentStore()
 
 // 品牌展示数据
 const loginBgImage = computed(() => {
@@ -393,47 +391,10 @@ const handleLogin = async () => {
 
     message.success('登录成功')
 
-    // 获取重定向路径
-    const redirectPath = sessionStorage.getItem('redirect') || '/'
-    sessionStorage.removeItem('redirect') // 清除重定向信息
-
-    // 根据用户角色决定重定向目标
-    if (redirectPath === '/') {
-      // 如果是管理员，直接跳转到/chat页面
-      if (userStore.isAdmin) {
-        router.push('/agent')
-        return
-      }
-
-      // 普通用户跳转到默认智能体
-      try {
-        // 初始化agentStore并获取智能体信息
-        await agentStore.initialize()
-
-        // 尝试获取默认智能体
-        if (agentStore.defaultAgentId) {
-          // 如果存在默认智能体，直接跳转
-          router.push(`/agent/${agentStore.defaultAgentId}`)
-          return
-        }
-
-        // 没有默认智能体，获取第一个可用智能体
-        const agentIds = Object.keys(agentStore.agents)
-        if (agentIds.length > 0) {
-          router.push(`/agent/${agentIds[0]}`)
-          return
-        }
-
-        // 没有可用智能体，回退到首页
-        router.push('/')
-      } catch (error) {
-        console.error('获取智能体信息失败:', error)
-        router.push('/')
-      }
-    } else {
-      // 跳转到其他预设的路径
-      router.push(redirectPath)
-    }
+    // 登录后统一跳转课程智能体；若有保存的访问路径则优先跳转该路径
+    const redirectPath = sessionStorage.getItem('redirect') || '/course'
+    sessionStorage.removeItem('redirect')
+    router.push(redirectPath)
   } catch (error) {
     console.error('登录失败:', error)
 
@@ -488,7 +449,7 @@ const handleInitialize = async () => {
     })
 
     message.success('管理员账户创建成功')
-    router.push('/')
+    router.push('/course')
   } catch (error) {
     console.error('初始化失败:', error)
     errorMessage.value = error.message || '初始化失败，请重试'
@@ -533,9 +494,9 @@ const checkServerHealth = async () => {
 
 // 组件挂载时
 onMounted(async () => {
-  // 如果已登录，跳转到首页
+  // 如果已登录，直接进入课程智能体
   if (userStore.isLoggedIn) {
-    router.push('/')
+    router.push('/course')
     return
   }
 

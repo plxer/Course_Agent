@@ -149,17 +149,17 @@ class GraphAdapter(ABC):
 class Neo4jConnectionManager:
     """
     Neo4j 连接管理器
-    专注于数据库连接管理，不包含业务逻辑
+    专注于数据库连接管理，不包含业务逻辑。
+    采用懒连接：首次访问 driver 时才建立连接，避免 API 启动时因 Neo4j 未就绪而失败。
     """
 
     def __init__(self):
-        self.driver = None
+        self._driver = None
         self.status = "closed"
-        self._connect()
 
     def _connect(self):
         """建立 Neo4j 连接"""
-        if self.driver and self._is_connected():
+        if self._driver and self._is_connected():
             return
 
         uri = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
@@ -167,9 +167,8 @@ class Neo4jConnectionManager:
         password = os.environ.get("NEO4J_PASSWORD", "0123456789")
 
         try:
-            self.driver = GD.driver(uri, auth=(username, password))
-            # 测试连接
-            with self.driver.session() as session:
+            self._driver = GD.driver(uri, auth=(username, password))
+            with self._driver.session() as session:
                 session.run("RETURN 1")
             self.status = "open"
             logger.info("Successfully connected to Neo4j")
@@ -179,14 +178,21 @@ class Neo4jConnectionManager:
 
     def _is_connected(self) -> bool:
         """检查连接是否有效"""
-        if not self.driver:
+        if not self._driver:
             return False
         try:
-            with self.driver.session() as session:
+            with self._driver.session() as session:
                 session.run("RETURN 1")
             return True
         except Exception:
             return False
+
+    @property
+    def driver(self):
+        """获取驱动，首次访问时懒连接"""
+        if not self._driver or not self._is_connected():
+            self._connect()
+        return self._driver
 
     def is_running(self):
         """检查图数据库是否正在运行"""
@@ -194,9 +200,9 @@ class Neo4jConnectionManager:
 
     def close(self):
         """关闭数据库连接"""
-        if self.driver:
-            self.driver.close()
-            self.driver = None
+        if self._driver:
+            self._driver.close()
+            self._driver = None
             self.status = "closed"
 
 

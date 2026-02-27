@@ -95,10 +95,10 @@
 
     <div class="send-button-container">
       <slot name="actions-right"></slot>
-      <a-tooltip :title="isLoading ? '停止回答' : ''">
+      <a-tooltip :title="isLoading && showStopButton ? '停止回答' : ''">
         <a-button
           @click="handleSendOrStop"
-          :disabled="sendButtonDisabled"
+          :disabled="sendButtonDisabled || (isLoading && !showStopButton)"
           type="link"
           class="send-button"
         >
@@ -188,6 +188,11 @@ const props = defineProps({
   mention: {
     type: Object,
     default: () => null
+  },
+  /** 是否在加载时显示停止按钮（智能体问答不显示） */
+  showStopButton: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -426,7 +431,7 @@ const iconComponents = {
 // 根据传入的图标名动态获取组件
 const getIcon = computed(() => {
   if (props.isLoading) {
-    return PauseOutlined
+    return props.showStopButton ? PauseOutlined : LoadingOutlined
   }
   return iconComponents[props.sendIcon] || ArrowUpOutlined
 })
