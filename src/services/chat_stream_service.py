@@ -346,11 +346,15 @@ async def stream_agent_chat(
 
         # 若该 thread_id 尚无对话（如课程页前端自建 thread_id），先创建一条，避免 add_message_by_thread_id 落库失败
         if await conv_repo.get_conversation_by_thread_id(thread_id) is None:
+            conv_metadata = {"source": meta.get("source", "conversation")}
+            if conv_metadata.get("source") == "reading" and meta.get("book_id"):
+                conv_metadata["book_id"] = meta.get("book_id")
             await conv_repo.create_conversation(
                 user_id=user_id,
                 agent_id=agent_id,
                 title="New Conversation",
                 thread_id=thread_id,
+                metadata=conv_metadata,
             )
 
         try:

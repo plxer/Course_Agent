@@ -95,6 +95,7 @@ async def course_chat_stream(
         "user_id": current_user.id,
         "has_image": False,
     })
+    # 前端可传 meta.source（如 "reading"），写入对话 metadata，问答页列表会排除 source=reading
 
     return StreamingResponse(
         stream_agent_chat(

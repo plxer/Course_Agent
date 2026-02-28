@@ -282,6 +282,7 @@ import { useRouter } from 'vue-router';
 import { LeftOutlined, RightOutlined, ArrowLeftOutlined, CommentOutlined, CloseOutlined, DeleteOutlined } from '@ant-design/icons-vue';
 import { listBooks, getBookPages, getBookPageUrl, ocrTextSelection, courseChatStream } from '@/apis/courseApi.js';
 import { useUserStore } from '@/stores/user';
+import { agentApi, threadApi } from '@/apis/agent_api.js';
 
 const router = useRouter();
 const userStore = useUserStore();
@@ -330,6 +331,49 @@ const chatMessagesBox = ref(null);
 const chatTextarea = ref(null);
 const currentChatMessage = ref('');
 const chatStreamController = ref(null);
+
+/** 默认智能体 ID，用于拉取课本伴读对话列表与历史 */
+const defaultAgentId = ref(null);
+
+/** 将历史接口返回的 history 转为 { role, content }[] */
+function historyToMessages(history) {
+  if (!Array.isArray(history)) return [];
+  return history
+    .filter((m) => m.type === 'human' || m.type === 'ai')
+    .map((m) => ({ role: m.type === 'human' ? 'user' : 'ai', content: m.content || '' }));
+}
+
+/** 已登录时拉取课本伴读 thread 列表，按 book_id 填入 bookChats（仅 threadId，messages 在选书时按需拉取） */
+async function loadReadingThreads() {
+  if (!userStore.isLoggedIn || !defaultAgentId.value) return;
+  try {
+    const list = await threadApi.getThreads(defaultAgentId.value, { source: 'reading' });
+    if (!Array.isArray(list)) return;
+    for (const thread of list) {
+      const bookId = thread.metadata && thread.metadata.book_id != null ? String(thread.metadata.book_id) : null;
+      if (!bookId) continue;
+      if (!bookChats.value[bookId]) {
+        bookChats.value[bookId] = { messages: [], threadId: null };
+      }
+      bookChats.value[bookId].threadId = thread.id;
+    }
+  } catch (err) {
+    console.error('加载课本伴读对话列表失败:', err);
+  }
+}
+
+/** 加载指定 thread 的历史到 chat.messages */
+async function loadBookChatHistory(chat) {
+  if (!defaultAgentId.value || !chat.threadId) return;
+  try {
+    const res = await agentApi.getAgentHistory(defaultAgentId.value, chat.threadId);
+    const list = res?.history ? historyToMessages(res.history) : [];
+    chat.messages = list;
+  } catch (err) {
+    console.error('加载课本伴读历史失败:', err);
+    chat.messages = chat.messages || [];
+  }
+}
 
 // 调整输入框高度
 const adjustTextareaHeight = () => {
@@ -432,6 +476,10 @@ const selectBook = async (book) => {
   const chat = getBookChat(book.id);
   chatMessages.value = chat.messages;
   chatThreadId.value = chat.threadId ?? null;
+  if (chat.threadId && chat.messages.length === 0 && defaultAgentId.value) {
+    await loadBookChatHistory(chat);
+    chatMessages.value = chat.messages;
+  }
   try {
     const response = await getBookPages(book.id);
     totalPages.value = response.page_count || 0;
@@ -871,7 +919,7 @@ const sendChatMessage = async () => {
         scrollChatToBottom();
       }
     },
-    { signal: chatStreamController.value.signal }
+    { signal: chatStreamController.value.signal, meta: { source: 'reading', book_id: book.id } }
     );
   } catch (error) {
     if (error.name === 'AbortError') {
@@ -917,8 +965,17 @@ const formatFileSize = (bytes) => {
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
 };
 
-onMounted(() => {
+onMounted(async () => {
   loadBooks();
+  if (userStore.isLoggedIn) {
+    try {
+      const res = await agentApi.getDefaultAgent();
+      defaultAgentId.value = res?.agent_id ?? null;
+      if (defaultAgentId.value) await loadReadingThreads();
+    } catch (err) {
+      console.error('获取默认智能体失败:', err);
+    }
+  }
 });
 </script>
 

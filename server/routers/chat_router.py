@@ -581,6 +581,7 @@ class ThreadResponse(BaseModel):
     title: str | None = None
     created_at: str
     updated_at: str
+    metadata: dict | None = None
 
 
 class AttachmentResponse(BaseModel):
@@ -624,10 +625,15 @@ async def create_thread(
 
 @chat.get("/threads", response_model=list[ThreadResponse])
 async def list_threads(
-    agent_id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_required_user)
+    agent_id: str,
+    source: str | None = Query(None, description="筛选来源：reading=课本伴读对话，不传或 conversation=问答页对话"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_required_user),
 ):
-    """获取用户的所有对话线程 (使用新存储系统)"""
-    return await list_threads_view(agent_id=agent_id, db=db, current_user_id=str(current_user.id))
+    """获取用户的所有对话线程 (使用新存储系统)。source=reading 时仅返回课本伴读对话。"""
+    return await list_threads_view(
+        agent_id=agent_id, db=db, current_user_id=str(current_user.id), source=source
+    )
 
 
 @chat.delete("/thread/{thread_id}")

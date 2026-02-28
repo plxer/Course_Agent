@@ -231,11 +231,13 @@ export const threadApi = {
   /**
    * 获取对话线程列表
    * @param {string} agentId - 智能体ID
-   * @returns {Promise} - 对话线程列表
+   * @param {Object} options - 可选，{ source: 'reading' } 仅返回课本伴读对话
+   * @returns {Promise} - 对话线程列表（含 metadata）
    */
-  getThreads: (agentId) => {
-    const url = `/api/chat/threads?agent_id=${agentId}`
-    return apiGet(url)
+  getThreads: (agentId, options = {}) => {
+    const params = new URLSearchParams({ agent_id: agentId })
+    if (options.source) params.set('source', options.source)
+    return apiGet(`/api/chat/threads?${params.toString()}`)
   },
 
   /**

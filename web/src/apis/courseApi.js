@@ -4,7 +4,7 @@
  */
 import { apiGet, apiPost } from './base'
 
-/** 课程对话流（需登录），options.signal 可传入 AbortSignal 用于停止 */
+/** 课程对话流（需登录），options.signal 可传入 AbortSignal 用于停止，options.meta 会传给后端（如 source: "reading" 表示课本伴读，不在问答页展示） */
 export async function courseChatStream(query, threadId = null, onChunk = null, options = {}) {
   const userStore = (await import('@/stores/user')).useUserStore()
   const headers = { 'Content-Type': 'application/json', ...(userStore.getAuthHeaders?.() || {}) }
@@ -13,11 +13,11 @@ export async function courseChatStream(query, threadId = null, onChunk = null, o
     throw new Error('请先登录后再使用对话功能')
   }
 
-  const { signal } = options
+  const { signal, meta } = options
   const response = await fetch('/api/course/chat/stream', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ query, thread_id: threadId }),
+    body: JSON.stringify({ query, thread_id: threadId, meta: meta || {} }),
     signal
   })
 

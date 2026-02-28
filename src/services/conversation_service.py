@@ -88,6 +88,7 @@ async def list_threads_view(
     agent_id: str,
     db: AsyncSession,
     current_user_id: str,
+    source: str | None = None,
 ) -> list[dict]:
     if not agent_id:
         raise HTTPException(status_code=422, detail="agent_id 不能为空")
@@ -98,6 +99,11 @@ async def list_threads_view(
         agent_id=agent_id,
         status="active",
     )
+    if source == "reading":
+        conversations = [c for c in conversations if (c.extra_metadata or {}).get("source") == "reading"]
+    else:
+        # 问答页：不展示课本伴读的对话
+        conversations = [c for c in conversations if (c.extra_metadata or {}).get("source") != "reading"]
 
     return [
         {
@@ -107,6 +113,7 @@ async def list_threads_view(
             "title": conv.title,
             "created_at": conv.created_at.isoformat(),
             "updated_at": conv.updated_at.isoformat(),
+            "metadata": conv.extra_metadata or {},
         }
         for conv in conversations
     ]
