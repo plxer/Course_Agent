@@ -15,6 +15,7 @@ from src import config as conf
 from src.agents import agent_manager
 from src.services.chat_stream_service import stream_agent_chat
 from src.storage.postgres.models_business import User
+from src.utils import logger
 from server.utils.auth_middleware import get_db, get_required_user
 
 course = APIRouter(prefix="/course", tags=["course"])
@@ -181,7 +182,9 @@ class OcrRequest(BaseModel):
 
 @course.post("/books/ocr")
 def ocr_text_selection(body: OcrRequest):
-    """对课本某一页的选区做 OCR，返回识别文本。"""
+    """对课本某一页的选区做 OCR，返回识别文本。
+    前端传入的 (x,y,width,height) 为「页面图片」像素坐标，与 GET /books/{id}/page/{num} 返回的图片尺寸一致（Matrix 2x），需转换为 PDF 坐标后裁剪。
+    """
     if body.page_num < 1:
         raise HTTPException(status_code=400, detail="页码从 1 开始")
     path = _resolve_book_path(body.book_id)
@@ -193,32 +196,55 @@ def ocr_text_selection(body: OcrRequest):
             if body.page_num > len(doc):
                 raise HTTPException(status_code=404, detail="页码超出范围")
             page = doc[body.page_num - 1]
-            # 选区为相对原始页面的坐标
-            rect = fitz.Rect(body.x, body.y, body.x + body.width, body.y + body.height)
+            # 前端传的是页面图片像素坐标（与 get_pixmap(matrix=2,2) 的尺寸一致），转换为 PDF 坐标
+            scale = 2.0  # 与下方 get_pixmap(Matrix(2,2)) 一致
+            x_pdf = body.x / scale
+            y_pdf = body.y / scale
+            w_pdf = body.width / scale
+            h_pdf = body.height / scale
+            rect = fitz.Rect(x_pdf, y_pdf, x_pdf + w_pdf, y_pdf + h_pdf)
             clip = rect & page.rect
             if clip.is_empty:
                 return {"success": True, "text": ""}
             pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=clip, alpha=False)
             img_bytes = pix.tobytes(output="png")
 
+            # 优先 PaddleOCR（高精度），其次 RapidOCR，最后 PDF 文本兜底
+            text = ""
             try:
-                from src.plugins.rapid_ocr_processor import RapidOcrProcessor
-                proc = RapidOcrProcessor()
+                from src.plugins.paddle_ocr_processor import PaddleOcrProcessor
+                proc = PaddleOcrProcessor()
                 if proc.check_health().get("status") == "healthy":
                     import tempfile
                     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                         tmp.write(img_bytes)
                         tmp.flush()
                         try:
-                            text = proc.process_file(tmp.name) or ""
-                            return {"success": True, "text": text.strip()}
+                            text = (proc.process_file(tmp.name) or "").strip()
+                            if text:
+                                logger.info("课本伴读 OCR 使用 PaddleOCR，识别 %d 字", len(text))
                         finally:
                             Path(tmp.name).unlink(missing_ok=True)
             except Exception:
                 pass
-            # 兜底：从 PDF 提取该区域的文本块
-            words = page.get_text("words", clip=clip)
-            text = " ".join(w[4] for w in words).strip()
+            if not text:
+                try:
+                    from src.plugins.rapid_ocr_processor import RapidOcrProcessor
+                    proc = RapidOcrProcessor()
+                    if proc.check_health().get("status") == "healthy":
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                            tmp.write(img_bytes)
+                            tmp.flush()
+                            try:
+                                text = (proc.process_file(tmp.name) or "").strip()
+                            finally:
+                                Path(tmp.name).unlink(missing_ok=True)
+                except Exception:
+                    pass
+            if not text:
+                words = page.get_text("words", clip=clip)
+                text = " ".join(w[4] for w in words).strip()
             return {"success": True, "text": text}
         finally:
             doc.close()

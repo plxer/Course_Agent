@@ -42,8 +42,10 @@ COPY ../.python-version /app/.python-version
 COPY ../uv.lock /app/uv.lock
 
 # 如果网络还是不好，可以在后面添加 --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+# 含 --group paddle 以启用课本伴读 PaddleOCR（构建时解析安装，无需预先锁入 uv.lock）
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --frozen
+    uv sync --no-dev --frozen && \
+    uv sync --no-dev --group paddle
 
 # 激活虚拟环境并添加到PATH
 ENV PATH="/app/.venv/bin:$PATH"

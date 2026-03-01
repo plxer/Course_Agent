@@ -15,7 +15,7 @@
 - `GET /api/course/books`：课本列表
 - `GET /api/course/books/{book_id}/pages`：课本页数
 - `GET /api/course/books/{book_id}/page/{page_num}`：课本某一页图片
-- `POST /api/course/books/ocr`：选区 OCR（PaddleOCR + PDF 文本兜底）
+- `POST /api/course/books/ocr`：选区 OCR（优先 PaddleOCR → RapidOCR → PDF 文本兜底）
 - `GET /api/course/videos`：视频列表（按章节）
 - `GET /api/course/videos/{video_id}`：视频文件流
 
@@ -50,5 +50,44 @@ volumes:
 
 ## OCR 依赖
 
-- 优先使用 **PaddleOCR**（需安装 `paddleocr`）；若不可用则使用 PDF 文本块提取。
-- 可选环境变量：`PADDLEOCR_USE_GPU=true` 启用 GPU。
+- 课本伴读选区 OCR **优先使用 PaddleOCR**（高精度）。需安装依赖组：`uv sync --group paddle`。未安装时自动回退到 RapidOCR（ONNX），再不可用则使用 PDF 文本块提取。
+- 可选环境变量：`PADDLEOCR_USE_GPU=true` 启用 PaddleOCR GPU 推理。
+- 若需使用 Paddle 系文档解析（表格/版面），请启动 PaddleX 服务并在上传知识库时选择 PP-StructureV3。
+
+### Docker 集成 PaddleOCR
+
+API 镜像已在构建时安装 PaddleOCR 依赖组，无需本地预锁。直接构建并启动：
+
+```bash
+docker compose build api
+docker compose up -d api
+```
+
+首次运行课本伴读选区 OCR 时，PaddleOCR 会在容器内自动下载模型（约数百 MB），可通过挂载卷缓存，例如在 `docker-compose.yml` 的 api 服务下：
+
+```yaml
+volumes:
+  - paddleocr-cache:/root/.paddleocr  # 可选：缓存 PaddleOCR 模型
+# 在顶层 volumes 声明
+# volumes:
+#   paddleocr-cache:
+```
+
+若需在容器内使用 GPU 加速，在 api 服务下配置 GPU 并传入环境变量：
+
+```yaml
+deploy:
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          device_ids: ['0']
+environment:
+  - PADDLEOCR_USE_GPU=true
+```
+
+在容器内查看 PaddleOCR 版本（3.x 需走兼容层，请用项目脚本）：
+
+```bash
+docker compose exec api python /app/scripts/check_paddleocr.py
+```

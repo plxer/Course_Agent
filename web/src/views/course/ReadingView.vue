@@ -1461,6 +1461,8 @@ onMounted(async () => {
   margin-bottom: 12px;
   color: var(--dark-text);
   line-height: 1.6;
+  white-space: pre-wrap; /* 保留换行与空格，与 OCR 版式一致 */
+  word-break: break-word;
 }
 
 .reading-selection-actions {
