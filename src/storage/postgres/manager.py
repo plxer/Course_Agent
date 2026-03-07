@@ -4,6 +4,7 @@ import json
 import os
 from contextlib import asynccontextmanager
 
+from starlette.exceptions import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
@@ -89,7 +90,20 @@ class PostgresManager(metaclass=SingletonMeta):
         self._check_initialized()
         async with self.async_engine.begin() as conn:
             await conn.run_sync(BusinessBase.metadata.create_all)
+        await self._ensure_business_schema()
         logger.info("PostgreSQL business tables created/checked")
+
+    async def _ensure_business_schema(self):
+        """为已有表添加新增字段（迁移用）"""
+        self._check_initialized()
+        if not self.is_postgresql:
+            return
+        stmts = [
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS points INTEGER NOT NULL DEFAULT 0",
+        ]
+        async with self.async_engine.begin() as conn:
+            for stmt in stmts:
+                await conn.execute(text(stmt))
 
     async def drop_tables(self):
         """删除所有表（慎用！）"""
@@ -184,6 +198,9 @@ class PostgresManager(metaclass=SingletonMeta):
         try:
             yield session
             await session.commit()
+        except HTTPException:
+            await session.rollback()
+            raise
         except Exception as e:
             await session.rollback()
             logger.error(f"PostgreSQL async operation failed: {e}")

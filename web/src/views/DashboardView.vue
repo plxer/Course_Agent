@@ -1,82 +1,70 @@
 <template>
-  <div class="dashboard-container">
-    <!-- 顶部状态条 -->
+  <div class="dashboard-container" :class="{ 'dashboard-embed': embedMode }">
+    <template v-if="!embedMode">
+      <div class="dashboard-page-header">
+        <h1 class="dashboard-page-title">访问统计</h1>
+        <p class="dashboard-page-desc">查看站点访问与使用情况，仅管理员可见</p>
+      </div>
+      <div class="modern-stats-header">
+        <StatusBar />
+        <StatsOverviewComponent :basic-stats="basicStats" />
+      </div>
+    </template>
+    <template v-else>
+      <!-- 课程运维精简：关键指标 4 卡 -->
+      <div class="ops-overview">
+        <div class="ops-stat-card">
+          <span class="ops-stat-value">{{ basicStats?.total_users ?? '—' }}</span>
+          <span class="ops-stat-label">用户数</span>
+        </div>
+        <div class="ops-stat-card">
+          <span class="ops-stat-value">{{ basicStats?.total_conversations ?? '—' }}</span>
+          <span class="ops-stat-label">总对话数</span>
+        </div>
+        <div class="ops-stat-card">
+          <span class="ops-stat-value">{{ basicStats?.total_messages ?? '—' }}</span>
+          <span class="ops-stat-label">总消息数</span>
+        </div>
+        <div class="ops-stat-card">
+          <span class="ops-stat-value">{{ basicStats?.active_users_24h ?? '—' }}</span>
+          <span class="ops-stat-label">24h 活跃用户</span>
+        </div>
+        <div class="ops-stat-card">
+          <span class="ops-stat-value">{{ basicStats?.total_exercise_attempts ?? '—' }}</span>
+          <span class="ops-stat-label">做题次数</span>
+        </div>
+      </div>
+    </template>
 
-    <!-- 现代化顶部统计栏 -->
-    <div class="modern-stats-header">
-      <StatusBar />
-      <StatsOverviewComponent :basic-stats="basicStats" />
-    </div>
-
-    <!-- Grid布局的主要内容区域 -->
-    <div class="dashboard-grid">
-      <!-- 调用统计模块 - 占据2x1网格 -->
+    <!-- 非 embed：完整仪表盘网格 -->
+    <div v-if="!embedMode" class="dashboard-grid">
       <CallStatsComponent :loading="loading" ref="callStatsRef" />
-
-      <!-- 用户活跃度分析 - 占据1x1网格 -->
       <div class="grid-item user-stats">
-        <UserStatsComponent
-          :user-stats="allStatsData?.users"
-          :loading="loading"
-          ref="userStatsRef"
-        />
+        <UserStatsComponent :user-stats="allStatsData?.users" :loading="loading" ref="userStatsRef" />
       </div>
-
-      <!-- AI智能体分析 - 占据1x1网格 -->
       <div class="grid-item agent-stats">
-        <AgentStatsComponent
-          :agent-stats="allStatsData?.agents"
-          :loading="loading"
-          ref="agentStatsRef"
-        />
+        <AgentStatsComponent :agent-stats="allStatsData?.agents" :loading="loading" ref="agentStatsRef" />
       </div>
-
-      <!-- 工具调用监控 - 占据1x1网格 -->
       <div class="grid-item tool-stats">
-        <ToolStatsComponent
-          :tool-stats="allStatsData?.tools"
-          :loading="loading"
-          ref="toolStatsRef"
-        />
+        <ToolStatsComponent :tool-stats="allStatsData?.tools" :loading="loading" ref="toolStatsRef" />
       </div>
-
-      <!-- 知识库使用情况 - 占据1x1网格 -->
       <div class="grid-item knowledge-stats">
-        <KnowledgeStatsComponent
-          :knowledge-stats="allStatsData?.knowledge"
-          :loading="loading"
-          ref="knowledgeStatsRef"
-        />
+        <KnowledgeStatsComponent :knowledge-stats="allStatsData?.knowledge" :loading="loading" ref="knowledgeStatsRef" />
       </div>
-
-      <!-- 对话记录 - 占据1x1网格 -->
       <div class="grid-item conversations">
         <a-card class="conversations-section" title="对话记录" :loading="loading">
           <template #extra>
             <a-space>
-              <a-input
-                v-model:value="filters.user_id"
-                placeholder="用户ID"
-                size="small"
-                style="width: 120px"
-                @change="handleFilterChange"
-              />
-              <a-select
-                v-model:value="filters.status"
-                placeholder="状态"
-                size="small"
-                style="width: 100px"
-                @change="handleFilterChange"
-              >
+              <a-input v-model:value="filters.user_id" placeholder="用户ID" size="small" style="width: 120px" @change="handleFilterChange" />
+              <a-select v-model:value="filters.status" placeholder="状态" size="small" style="width: 100px" @change="handleFilterChange">
                 <a-select-option value="active">活跃</a-select-option>
                 <a-select-option value="deleted">已删除</a-select-option>
                 <a-select-option value="all">全部</a-select-option>
               </a-select>
-              <a-button size="small" @click="loadConversations" :loading="loading"> 刷新 </a-button>
-              <a-button size="small" @click="feedbackModal.show()"> 反馈详情 </a-button>
+              <a-button size="small" @click="loadConversations" :loading="loading">刷新</a-button>
+              <a-button size="small" @click="feedbackModal.show()">反馈详情</a-button>
             </a-space>
           </template>
-
           <a-table
             :columns="conversationColumns"
             :data-source="conversations"
@@ -88,30 +76,19 @@
           >
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'title'">
-                <a
-                  @click="handleViewDetail(record)"
-                  class="conversation-title"
-                  :class="{ loading: loadingDetail }"
-                  >{{ record.title || '未命名对话' }}</a
-                >
+                <a @click="handleViewDetail(record)" class="conversation-title" :class="{ loading: loadingDetail }">{{ record.title || '未命名对话' }}</a>
+              </template>
+              <template v-if="column.key === 'user_display'">
+                <span class="user-display">{{ record.user_login || record.user_id || '—' }}</span>
               </template>
               <template v-if="column.key === 'status'">
-                <a-tag :color="record.status === 'active' ? 'green' : 'red'" size="small">
-                  {{ record.status === 'active' ? '活跃' : '已删除' }}
-                </a-tag>
+                <a-tag :color="record.status === 'active' ? 'green' : 'red'" size="small">{{ record.status === 'active' ? '活跃' : '已删除' }}</a-tag>
               </template>
               <template v-if="column.key === 'updated_at'">
                 <span class="time-text">{{ formatDate(record.updated_at) }}</span>
               </template>
               <template v-if="column.key === 'actions'">
-                <a-button
-                  type="link"
-                  size="small"
-                  @click="handleViewDetail(record)"
-                  :loading="loadingDetail"
-                >
-                  详情
-                </a-button>
+                <a-button type="link" size="small" @click="handleViewDetail(record)" :loading="loadingDetail">详情</a-button>
               </template>
             </template>
           </a-table>
@@ -119,15 +96,155 @@
       </div>
     </div>
 
-    <!-- 反馈模态框 -->
-    <FeedbackModalComponent ref="feedbackModal" />
+    <!-- 课程运维精简：智能体调用 + 对话记录 + 做题记录 -->
+    <div v-else class="ops-grid">
+      <div class="ops-chart">
+        <CallStatsComponent :loading="loading" ref="callStatsRef" />
+      </div>
+      <div class="ops-table-section">
+        <a-card class="conversations-section" title="用户对话记录" :loading="loading">
+          <template #extra>
+            <a-space>
+              <a-input v-model:value="filters.user_id" placeholder="用户" size="small" style="width: 100px" @change="handleFilterChange" />
+              <a-select v-model:value="filters.status" placeholder="状态" size="small" style="width: 90px" @change="handleFilterChange">
+                <a-select-option value="active">活跃</a-select-option>
+                <a-select-option value="deleted">已删除</a-select-option>
+                <a-select-option value="all">全部</a-select-option>
+              </a-select>
+              <a-button size="small" @click="loadConversations" :loading="loading">刷新</a-button>
+            </a-space>
+          </template>
+          <a-table
+            :columns="conversationColumns"
+            :data-source="conversations"
+            :loading="loading"
+            :pagination="conversationPagination"
+            @change="handleTableChange"
+            row-key="thread_id"
+            size="small"
+          >
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'title'">
+                <a @click="handleViewDetail(record)" class="conversation-title" :class="{ loading: loadingDetail }">{{ record.title || '未命名对话' }}</a>
+              </template>
+              <template v-if="column.key === 'user_display'">
+                <span class="user-display">{{ record.user_login || record.user_id || '—' }}</span>
+              </template>
+              <template v-if="column.key === 'status'">
+                <a-tag :color="record.status === 'active' ? 'green' : 'red'" size="small">{{ record.status === 'active' ? '活跃' : '已删除' }}</a-tag>
+              </template>
+              <template v-if="column.key === 'updated_at'">
+                <span class="time-text">{{ formatDate(record.updated_at) }}</span>
+              </template>
+              <template v-if="column.key === 'actions'">
+                <a-button type="link" size="small" @click="handleViewDetail(record)" :loading="loadingDetail">详情</a-button>
+              </template>
+            </template>
+          </a-table>
+        </a-card>
+      </div>
+      <div class="ops-table-section">
+        <a-card class="conversations-section" title="做题记录" :loading="loadingExercises">
+          <template #extra>
+            <a-space>
+              <a-input
+                v-model:value="exerciseUserFilter"
+                placeholder="用户"
+                size="small"
+                style="width: 100px"
+                allow-clear
+              />
+              <a-button size="small" @click="loadExerciseAttempts" :loading="loadingExercises">刷新</a-button>
+            </a-space>
+          </template>
+          <a-table
+            :columns="exerciseColumns"
+            :data-source="exerciseAttempts"
+            :loading="loadingExercises"
+            :pagination="false"
+            row-key="id"
+            size="small"
+          >
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'user_login'">
+                <span class="user-display">{{ record.user_login }}</span>
+              </template>
+              <template v-if="column.key === 'is_correct'">
+                <a-tag :color="record.is_correct ? 'green' : 'red'" size="small">{{ record.is_correct ? '对' : '错' }}</a-tag>
+              </template>
+              <template v-if="column.key === 'created_at'">
+                <span class="time-text">{{ formatDetailTime(record.created_at) }}</span>
+              </template>
+            </template>
+          </a-table>
+        </a-card>
+      </div>
+    </div>
+
+    <!-- 反馈模态框（仅完整仪表盘） -->
+    <FeedbackModalComponent v-if="!embedMode" ref="feedbackModal" />
+
+    <!-- 对话详情弹窗 -->
+    <a-modal
+      v-model:open="detailModalOpen"
+      title="对话详情"
+      width="720px"
+      :footer="null"
+      destroy-on-close
+      class="conversation-detail-modal"
+      @cancel="detailData = null"
+    >
+      <template v-if="detailData">
+        <div class="detail-meta">
+          <div class="detail-meta-row">
+            <span class="detail-label">用户</span>
+            <span class="detail-value">{{ detailData.user_login || detailData.user_id || '—' }}</span>
+          </div>
+          <div class="detail-meta-row">
+            <span class="detail-label">标题</span>
+            <span class="detail-value">{{ detailData.title || '未命名对话' }}</span>
+          </div>
+          <div class="detail-meta-row">
+            <span class="detail-label">消息数</span>
+            <span class="detail-value">{{ detailData.message_count ?? 0 }}</span>
+          </div>
+          <div class="detail-meta-row">
+            <span class="detail-label">状态</span>
+            <a-tag :color="detailData.status === 'active' ? 'green' : 'red'" size="small">
+              {{ detailData.status === 'active' ? '活跃' : '已删除' }}
+            </a-tag>
+          </div>
+        </div>
+        <div class="detail-messages">
+          <h4 class="detail-messages-title">消息记录</h4>
+          <div v-if="detailData.messages && detailData.messages.length" class="detail-messages-list">
+            <div
+              v-for="(msg, idx) in detailData.messages"
+              :key="msg.id || idx"
+              class="detail-message-item"
+              :class="msg.role"
+            >
+              <span class="detail-message-role">{{ msg.role === 'user' ? '用户' : 'AI' }}</span>
+              <span class="detail-message-time">{{ formatDetailTime(msg.created_at) }}</span>
+              <div class="detail-message-content">{{ msg.content || '—' }}</div>
+            </div>
+          </div>
+          <div v-else class="detail-messages-empty">暂无消息</div>
+        </div>
+      </template>
+      <div v-else class="detail-loading">加载中…</div>
+    </a-modal>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, watch, onMounted, onUnmounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { dashboardApi } from '@/apis/dashboard_api'
+
+const props = defineProps({
+  embedMode: { type: Boolean, default: false }
+})
 import dayjs, { parseToShanghai } from '@/utils/time'
 
 // 导入子组件
@@ -164,6 +281,15 @@ const conversations = ref([])
 const loading = ref(false)
 const loadingDetail = ref(false)
 
+// 做题记录（运维）
+const exerciseAttempts = ref([])
+const loadingExercises = ref(false)
+const exerciseUserFilter = ref('')
+
+// 详情弹窗
+const detailModalOpen = ref(false)
+const detailData = ref(null)
+
 // 调用统计子组件引用
 const callStatsRef = ref(null)
 
@@ -187,9 +313,8 @@ const conversationColumns = [
   },
   {
     title: '用户',
-    dataIndex: 'user_id',
-    key: 'user_id',
-    width: '80px',
+    key: 'user_display',
+    width: '100px',
     ellipsis: true
   },
   {
@@ -220,49 +345,73 @@ const conversationColumns = [
   }
 ]
 
+// 做题记录列（运维）
+const exerciseColumns = [
+  { title: '用户', dataIndex: 'user_login', key: 'user_login', width: 90, ellipsis: true },
+  { title: '题型', dataIndex: 'question_type', key: 'question_type', width: 80 },
+  { title: '知识点', dataIndex: 'knowledge_point', key: 'knowledge_point', ellipsis: true },
+  { title: '对/错', dataIndex: 'is_correct', key: 'is_correct', width: 64, align: 'center' },
+  { title: '时间', dataIndex: 'created_at', key: 'created_at', width: 150 }
+]
+
 // 子组件引用
 const userStatsRef = ref(null)
 const toolStatsRef = ref(null)
 const knowledgeStatsRef = ref(null)
 const agentStatsRef = ref(null)
 
-// 加载统计数据 - 使用并行API调用
+// 加载统计数据
 const loadAllStats = async () => {
   loading.value = true
   try {
-    // 使用并行API调用获取所有统计数据
-    const response = await dashboardApi.getAllStats()
-
-    // 更新基础统计数据
-    basicStats.value = response.basic
-
-    // 更新详细统计数据
-    allStatsData.value = {
-      users: response.users,
-      tools: response.tools,
-      knowledge: response.knowledge,
-      agents: response.agents
+    if (props.embedMode) {
+      basicStats.value = await dashboardApi.getStats()
+    } else {
+      const response = await dashboardApi.getAllStats()
+      basicStats.value = response.basic
+      allStatsData.value = {
+        users: response.users,
+        tools: response.tools,
+        knowledge: response.knowledge,
+        agents: response.agents
+      }
     }
-
-    console.log('Dashboard 数据加载完成:', response)
-    message.success('数据加载成功')
   } catch (error) {
     console.error('加载统计数据失败:', error)
     message.error('加载统计数据失败')
-
-    // 如果并行请求失败，尝试单独加载基础数据
-    try {
-      const basicResponse = await dashboardApi.getStats()
-      basicStats.value = basicResponse
-      message.warning('详细数据加载失败，仅显示基础统计')
-    } catch (basicError) {
-      console.error('加载基础统计数据也失败:', basicError)
-      message.error('无法加载任何统计数据')
+    if (!props.embedMode) {
+      try {
+        basicStats.value = await dashboardApi.getStats()
+      } catch {
+        // ignore
+      }
     }
   } finally {
     loading.value = false
   }
 }
+
+// 加载做题记录（运维）
+const loadExerciseAttempts = async () => {
+  loadingExercises.value = true
+  try {
+    const params = { limit: 50, offset: 0 }
+    if (exerciseUserFilter.value?.trim()) params.user_login = exerciseUserFilter.value.trim()
+    exerciseAttempts.value = await dashboardApi.getExerciseAttempts(params)
+  } catch (error) {
+    console.error('加载做题记录失败:', error)
+    message.error('加载做题记录失败')
+  } finally {
+    loadingExercises.value = false
+  }
+}
+
+// 用户筛选输入防抖后自动查询做题记录
+let exerciseFilterTimer = null
+watch(exerciseUserFilter, () => {
+  if (exerciseFilterTimer) clearTimeout(exerciseFilterTimer)
+  exerciseFilterTimer = setTimeout(() => loadExerciseAttempts(), 300)
+})
 
 // 保留原有的loadStats函数以兼容旧代码
 const loadStats = loadAllStats
@@ -308,15 +457,25 @@ const formatDate = (dateString) => {
   return parsed.format('MM-DD')
 }
 
+// 详情弹窗内时间格式
+const formatDetailTime = (dateString) => {
+  if (!dateString) return '—'
+  const parsed = parseToShanghai(dateString)
+  return parsed ? parsed.format('YYYY-MM-DD HH:mm:ss') : '—'
+}
+
 // 查看对话详情
 const handleViewDetail = async (record) => {
   try {
     loadingDetail.value = true
+    detailData.value = null
+    detailModalOpen.value = true
     const detail = await dashboardApi.getConversationDetail(record.thread_id)
-    console.log(detail)
+    detailData.value = detail
   } catch (error) {
     console.error('获取对话详情失败:', error)
     message.error('获取对话详情失败')
+    detailModalOpen.value = false
   } finally {
     loadingDetail.value = false
   }
@@ -348,20 +507,100 @@ const cleanupCharts = () => {
 onMounted(() => {
   loadAllStats()
   loadConversations()
+  if (props.embedMode) {
+    loadExerciseAttempts()
+  }
 })
 
 // 组件卸载时清理图表
 onUnmounted(() => {
+  if (exerciseFilterTimer) clearTimeout(exerciseFilterTimer)
   cleanupCharts()
 })
 </script>
 
 <style scoped lang="less">
 .dashboard-container {
-  // padding: 0 24px 24px 24px;
   background-color: var(--gray-25);
   min-height: calc(100vh - 64px);
   overflow-x: hidden;
+
+  &.dashboard-embed .modern-stats-header {
+    padding-top: 16px;
+  }
+}
+
+/* 课程运维精简：关键指标卡片 */
+.ops-overview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 24px 0;
+  margin-bottom: 16px;
+}
+.ops-stat-card {
+  background: var(--gray-0);
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  padding: 12px 20px;
+  min-width: 100px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  .ops-stat-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--gray-1000);
+    line-height: 1.2;
+  }
+  .ops-stat-label {
+    font-size: 12px;
+    color: var(--gray-600);
+    margin-top: 4px;
+  }
+}
+
+/* 课程运维精简：图表 + 两个表格 */
+.ops-grid {
+  display: grid;
+  padding: 0 16px 24px;
+  gap: 16px;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto auto;
+}
+.ops-chart {
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  :deep(.grid-item.call-stats) {
+    flex: 1;
+    min-height: 0;
+  }
+  :deep(.call-stats-container .chart-container),
+  :deep(.chart-container .chart) {
+    min-height: 280px;
+  }
+}
+.ops-table-section {
+  min-height: 280px;
+}
+
+.dashboard-page-header {
+  padding: 16px 24px 0;
+  margin-bottom: 8px;
+
+  .dashboard-page-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--gray-1000);
+    margin: 0 0 4px 0;
+  }
+
+  .dashboard-page-desc {
+    font-size: 13px;
+    color: var(--gray-600);
+    margin: 0;
+  }
 }
 
 // Dashboard 特有的网格布局
@@ -388,7 +627,7 @@ onUnmounted(() => {
       .conversations-section,
       .call-stats-section {
         border-color: var(--gray-200);
-        box-shadow: 0 1px 3px 0 var(--shadow-100);
+        box-shadow: 0 1px 3px 0 var(--shadow-1);
       }
     }
 
@@ -443,7 +682,7 @@ onUnmounted(() => {
   &:hover {
     background-color: var(--gray-25);
     border-color: var(--gray-200);
-    box-shadow: 0 1px 3px 0 var(--shadow-100);
+    box-shadow: 0 1px 3px 0 var(--shadow-1);
   }
 
   :deep(.ant-card-head) {
@@ -508,6 +747,11 @@ onUnmounted(() => {
     font-size: 14px;
     color: var(--gray-600);
   }
+}
+
+.user-display {
+  color: var(--gray-800);
+  font-size: 13px;
 }
 
 // Dashboard 特有的对话记录样式
@@ -699,5 +943,74 @@ onUnmounted(() => {
       font-size: 12px;
     }
   }
+}
+</style>
+
+<style lang="less">
+/* 对话详情弹窗（非 scoped：Modal 会挂载到 body） */
+.conversation-detail-modal .detail-meta {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--gray-200);
+}
+.conversation-detail-modal .detail-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+.conversation-detail-modal .detail-label {
+  color: var(--gray-600);
+  min-width: 64px;
+}
+.conversation-detail-modal .detail-value {
+  color: var(--gray-1000);
+}
+.conversation-detail-modal .detail-messages-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gray-1000);
+  margin: 0 0 12px 0;
+}
+.conversation-detail-modal .detail-messages-list {
+  max-height: 360px;
+  overflow-y: auto;
+}
+.conversation-detail-modal .detail-message-item {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  border: 1px solid var(--gray-200);
+  background: var(--gray-25);
+}
+.conversation-detail-modal .detail-message-item.user {
+  background: var(--main-50);
+  border-color: var(--main-200);
+}
+.conversation-detail-modal .detail-message-item.ai {
+  background: var(--gray-10);
+}
+.conversation-detail-modal .detail-message-role {
+  font-weight: 600;
+  color: var(--gray-700);
+  margin-right: 8px;
+}
+.conversation-detail-modal .detail-message-time {
+  font-size: 12px;
+  color: var(--gray-500);
+}
+.conversation-detail-modal .detail-message-content {
+  margin-top: 6px;
+  color: var(--gray-1000);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.conversation-detail-modal .detail-messages-empty,
+.conversation-detail-modal .detail-loading {
+  color: var(--gray-500);
+  text-align: center;
+  padding: 24px;
 }
 </style>

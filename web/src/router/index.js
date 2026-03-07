@@ -88,16 +88,13 @@ const router = createRouter({
     },
     {
       path: '/dashboard',
-      name: 'dashboard',
-      component: AppLayout,
-      children: [
-        {
-          path: '',
-          name: 'DashboardComp',
-          component: () => import('../views/DashboardView.vue'),
-          meta: { keepAlive: false, requiresAuth: true, requiresAdmin: true }
-        }
-      ]
+      redirect: '/ops'
+    },
+    {
+      path: '/ops',
+      name: 'ops',
+      component: () => import('../views/course/OpsView.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true }
     },
     // 课程智能体（计算机网络等）：问答、课本伴读、视频、习题推荐（需登录）
     {
@@ -128,6 +125,12 @@ const router = createRouter({
       path: '/videos',
       name: 'courseVideos',
       component: () => import('../views/course/VideosView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/mall',
+      name: 'courseMall',
+      component: () => import('../views/course/MallView.vue'),
       meta: { requiresAuth: true }
     },
     {

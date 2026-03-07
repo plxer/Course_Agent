@@ -31,7 +31,8 @@
       </template>
 
       <div class="call-stats-container">
-        <div class="chart-container">
+        <div v-if="!callStatsLoading && hasNoCallStatsData" class="call-stats-empty">暂无数据</div>
+        <div v-else class="chart-container">
           <div ref="callStatsChartRef" class="chart"></div>
         </div>
       </div>
@@ -75,6 +76,13 @@ const dataTypeOptions = [
   { value: 'tools', label: '工具调用' }
 ]
 const isTokenView = computed(() => callDataType.value === 'tokens')
+const hasNoCallStatsData = computed(() => {
+  const d = callStatsData.value
+  if (!d) return true
+  const total = d.total_count ?? 0
+  const dataLen = (d.data || []).length
+  return dataLen === 0 || total === 0
+})
 
 const formatTokenValue = (value) => {
   if (value === null || value === undefined || Number.isNaN(value)) {
@@ -122,6 +130,7 @@ const loadCallStats = async () => {
     renderCallStatsChart()
   } catch (error) {
     console.error('加载调用统计数据失败:', error)
+    callStatsData.value = null
   } finally {
     callStatsLoading.value = false
   }
@@ -245,6 +254,8 @@ const renderCallStatsChart = () => {
   }
 
   callStatsChart.setOption(option)
+  callStatsChart.resize()
+  setTimeout(() => callStatsChart?.resize(), 100)
 
   window.addEventListener('resize', handleResize, resizeListenerOptions)
 }
@@ -345,6 +356,15 @@ onUnmounted(() => {
   padding: 0; /* 移除chart的padding */
   border: none; /* 移除chart的border */
   background-color: transparent; /* 移除背景色 */
+}
+
+.call-stats-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-500);
+  font-size: 14px;
 }
 
 .simple-controls {

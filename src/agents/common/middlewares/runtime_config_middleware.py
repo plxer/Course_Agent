@@ -7,7 +7,7 @@ from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResp
 from langchain_core.messages import SystemMessage
 
 from src.agents.common import load_chat_model
-from src.agents.common.tools import get_buildin_tools, get_kb_based_tools
+from src.agents.common.tools import get_buildin_tools, get_kb_based_tools, get_tavily_search
 from src.services.mcp_service import get_enabled_mcp_tools
 from src.utils.datetime_utils import shanghai_now
 from src.utils.logging_config import logger
@@ -89,18 +89,16 @@ class RuntimeConfigMiddleware(AgentMiddleware):
             model = load_chat_model(getattr(runtime_context, self.model_context_name, None))
             overrides["model"] = model
 
-        # 2. 工具覆盖（可选）
+        # 2. 工具覆盖（可选）：直接使用 enabled_tools，确保 enable_web_search 等运行时开关生效
+        # （若只过滤 request.tools，当 initial default_tools 未包含 Tavily 时无法加入）
         if self.enable_tools_override:
             enabled_tools = await self.get_tools_from_context(runtime_context)
-            existing_tools = list(request.tools or [])
-            merged_tools = []
-            for t_bind in existing_tools:
-                # (1) 已启用的工具保留
-                # (2) 非本中间件管理的工具保留
-                if t_bind.name in [t.name for t in enabled_tools] or t_bind.name not in [t.name for t in self.tools]:
-                    merged_tools.append(t_bind)
-            overrides["tools"] = merged_tools
-            logger.debug(f"RuntimeConfigMiddleware selected tools: {[t.name for t in merged_tools]}")
+            overrides["tools"] = enabled_tools
+            enable_web = getattr(runtime_context, "enable_web_search", False)
+            logger.info(
+                f"RuntimeConfigMiddleware tools: enable_web_search={enable_web}, "
+                f"count={len(enabled_tools)}, names={[t.name for t in enabled_tools]}"
+            )
 
         # 3. 系统提示词覆盖（可选）
         if self.enable_system_prompt_override:
@@ -141,5 +139,11 @@ class RuntimeConfigMiddleware(AgentMiddleware):
             for server_name in mcps:
                 mcp_tools = await get_enabled_mcp_tools(server_name)
                 selected_tools.extend(mcp_tools)
+
+        # 4. 网络搜索工具（用户/会话级开关，仅当全局已启用时可用）
+        if getattr(context, "enable_web_search", False):
+            tavily = get_tavily_search()
+            if tavily is not None:
+                selected_tools.append(tavily)
 
         return selected_tools

@@ -11,6 +11,8 @@
             <router-link to="/exercises" class="conversation-view-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
             <router-link to="/reading" class="conversation-view-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
             <router-link to="/videos" class="conversation-view-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
+            <router-link to="/mall" class="conversation-view-nav-link" :class="{ active: $route.path === '/mall' }">积分商城</router-link>
+            <router-link v-if="userStore.isAdmin" to="/ops" class="conversation-view-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
           </div>
           <div class="conversation-view-auth">
             <template v-if="!userStore.isLoggedIn">
@@ -52,10 +54,15 @@
                 <button 
                   v-if="chatList.length > 1"
                   class="conversation-item-delete"
+                  type="button"
                   @click.stop="deleteChat(chat.id)"
                   title="删除对话"
+                  aria-label="删除对话"
                 >
-                  <i class="fa fa-times"></i>
+                  <svg class="conversation-item-delete-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
                 </button>
               </div>
             </div>
@@ -82,7 +89,29 @@
               <svg class="avatar-robot" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h2v1h2v2h2v2h1c.55 0 1 .45 1 1v2h1v2h-1v2H4v-2H3v-2h1v-2c0-.55.45-1 1-1h1v-2h2V8h2V7h2V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M8 18h8v-2H8v2m-1-5h2v2H7v-2m8 0v2h-2v-2h2m-3-3h2v2h-2v-2m-4 0v2H7v-2h2z"/></svg>
             </div>
             <div class="conversation-view-message-content" :class="message.role">
-              <div class="message-text">{{ message.content }}</div>
+              <div v-if="message.role === 'user'" class="message-text">{{ message.content }}</div>
+              <template v-else-if="message.role === 'ai'">
+                <div
+                  v-if="message.sources && message.sources.length > 0"
+                  class="conversation-view-msg-sources"
+                >
+                  <div class="msg-sources-title">参考来源（共 {{ message.sources.length }} 条）</div>
+                  <ul class="msg-sources-list">
+                    <li
+                      v-for="(src, idx) in message.sources"
+                      :key="idx"
+                      class="msg-sources-item"
+                    >
+                      <a :href="src.url" target="_blank" rel="noopener noreferrer">{{ src.title || src.url }}</a>
+                    </li>
+                  </ul>
+                </div>
+                <div
+                  v-if="message.content"
+                  class="message-text conversation-view-markdown"
+                  v-html="renderMarkdown(message.content)"
+                />
+              </template>
             </div>
             <div v-if="message.role === 'user'" class="conversation-view-message-avatar user">
               <i class="fa fa-user"></i>
@@ -95,8 +124,30 @@
               <svg class="avatar-robot" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h2v1h2v2h2v2h1c.55 0 1 .45 1 1v2h1v2h-1v2H4v-2H3v-2h1v-2c0-.55.45-1 1-1h1v-2h2V8h2V7h2V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M8 18h8v-2H8v2m-1-5h2v2H7v-2m8 0v2h-2v-2h2m-3-3h2v2h-2v-2m-4 0v2H7v-2h2z"/></svg>
             </div>
             <div class="conversation-view-message-content ai loading">
-              <div v-if="currentAiMessage" class="message-text" :key="`loading-${currentAiMessage.length}`">{{ currentAiMessage }}</div>
-              <div v-else class="typing-indicator">
+              <div
+                v-if="searchSources.length > 0"
+                class="conversation-view-search-sources"
+              >
+                <div class="search-sources-title">信息来源</div>
+                <ul class="search-sources-list">
+                  <li
+                    v-for="(src, idx) in searchSources"
+                    :key="idx"
+                    class="search-sources-item"
+                  >
+                    <a :href="src.url" target="_blank" rel="noopener noreferrer">{{ src.title || src.url }}</a>
+                  </li>
+                </ul>
+              </div>
+              <div v-if="currentAiMessage" :key="`loading-${currentAiMessage.length}`" class="conversation-view-message-with-spinner">
+                <div class="message-text conversation-view-markdown" v-html="renderMarkdown(currentAiMessage)" />
+                <!-- 转圈单独一行，避免被遮挡；AI 说出「搜索」或收到 tool_calling 时显示 -->
+                <div v-if="showSearchSpinner" class="conversation-view-spinner-row">
+                  <span class="conversation-view-spinner-inline" aria-hidden="true"></span>
+                  <span class="conversation-view-spinner-label">搜索中</span>
+                </div>
+              </div>
+              <div v-else-if="searchSources.length === 0" class="typing-indicator">
                 <span></span>
                 <span></span>
                 <span></span>
@@ -106,16 +157,21 @@
         </div>
 
           <!-- 输入区域 -->
-          <div class="conversation-view-input-area">
-            <textarea 
-              ref="inputTextarea"
-              v-model="inputMessage" 
-              class="conversation-view-textarea" 
-              placeholder="请输入你的问题..."
-              @input="adjustTextareaHeight"
-              @keydown.enter.exact.prevent="sendMessage"
-              @keydown.enter.shift.exact="handleShiftEnter"
-            ></textarea>
+          <div class="conversation-view-input-wrap">
+            <label class="conversation-view-web-search-opt">
+              <input type="checkbox" v-model="enableWebSearch" class="conversation-view-web-search-cb" />
+              <span>启用网络搜索</span>
+            </label>
+            <div class="conversation-view-input-area">
+              <textarea
+                ref="inputTextarea"
+                v-model="inputMessage"
+                class="conversation-view-textarea"
+                placeholder="请输入你的问题..."
+                @input="adjustTextareaHeight"
+                @keydown.enter.exact.prevent="sendMessage"
+                @keydown.enter.shift.exact="handleShiftEnter"
+              ></textarea>
             <button 
               v-if="!isLoading || currentChatId !== activeRequestChatId"
               class="conversation-view-send-btn" 
@@ -133,6 +189,7 @@
             >
               <i class="fa fa-stop"></i> 停止
             </button>
+            </div>
           </div>
         </div>
       </div>
@@ -141,51 +198,75 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue';
+import { ref, computed, onMounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
-import { courseChatStream } from '@/apis/courseApi.js';
+import { marked } from 'marked';
+import { courseChatStream, generateConversationTitle } from '@/apis/courseApi.js';
 import { agentApi, threadApi } from '@/apis';
 import { useUserStore } from '@/stores/user';
+import { useCourseConversationStore } from '@/stores/courseConversation';
 
 const router = useRouter();
 const userStore = useUserStore();
+const store = useCourseConversationStore();
 const inputMessage = ref('');
+const enableWebSearch = ref(false);
+
+function renderMarkdown(text) {
+  if (!text || typeof text !== 'string') return '';
+  return marked.parse(text, { gfm: true, breaks: true });
+}
 
 const handleLogout = () => {
+  store.resetStreamState();
   userStore.logout();
   router.push('/course');
 };
 const handleSwitchAccount = () => {
+  store.resetStreamState();
   userStore.logout();
   router.push('/login');
 };
-const messages = ref([]);
-const isLoading = ref(false);
+
 const messageBox = ref(null);
 const inputTextarea = ref(null);
-const threadId = ref(null);
-const currentAiMessage = ref('');
-const streamController = ref(null);
 
-// 对话列表相关
-const chatList = ref([]);
-const currentChatId = ref(null);
-/** 新建对话序号（删除不影响已有对话的序号） */
-const nextChatNumber = ref(1);
-/** 当前正在收流的对话 id，用于仅在该对话中显示加载和追加回复 */
-const activeRequestChatId = ref(null);
-/** 课程使用的默认智能体 id，与后端 /course/chat/stream 一致，用于拉取/创建 thread */
-const defaultAgentId = ref(null);
+// 从 store 取状态，便于模板和逻辑中使用
+const chatList = computed(() => store.chatList);
+const currentChatId = computed(() => store.currentChatId);
+const messages = computed(() => store.messages);
+const isLoading = computed(() => store.isLoading);
+const threadId = computed(() => store.threadId);
+const currentAiMessage = computed(() => store.currentAiMessage);
+const activeRequestChatId = computed(() => store.activeRequestChatId);
+const searchStatus = computed(() => store.searchStatus);
+const searchQuery = computed(() => store.searchQuery);
+const searchSources = computed(() => store.searchSources);
+/** 是否显示搜索中转圈：仅当 searchStatus 为 searching 时显示，搜索完成(done)后不再显示 */
+const showSearchSpinner = computed(() => {
+  if (store.searchStatus === 'searching') return true;
+  if (store.searchStatus === 'done') return false;
+  if (store.isLoading && store.currentAiMessage && /搜索/.test(store.currentAiMessage)) return true;
+  return false;
+});
 
-// 用首条用户消息生成简短标题（首轮对话后调用），并同步到后端
-const summarizeChatTitle = (chat) => {
+// 根据首条用户问题 + 首条智能体回答，调用模型生成简短标题并同步到后端
+const summarizeChatTitle = async (chat) => {
   const userMsg = chat.messages?.find(m => m.role === 'user');
+  const aiMsg = chat.messages?.find(m => m.role === 'ai');
   if (!userMsg?.content) return;
-  const text = userMsg.content.trim();
-  const maxLen = 20;
-  chat.title = text.length <= maxLen ? text : text.slice(0, maxLen) + '…';
-  if (userStore.isLoggedIn && defaultAgentId.value && chat.id) {
-    threadApi.updateThread(chat.id, chat.title).catch((err) => console.error('更新对话标题失败:', err));
+  const firstQuestion = userMsg.content.trim();
+  const firstAnswer = (aiMsg?.content || '').trim();
+  let title = firstQuestion.length <= 20 ? firstQuestion : firstQuestion.slice(0, 20) + '…';
+  if (userStore.isLoggedIn && firstAnswer) {
+    try {
+      const generated = await generateConversationTitle(firstQuestion, firstAnswer);
+      if (generated) title = generated;
+    } catch (_) {}
+  }
+  chat.title = title;
+  if (userStore.isLoggedIn && store.defaultAgentId && chat.id) {
+    threadApi.updateThread(chat.id, title).catch((err) => console.error('更新对话标题失败:', err));
   }
 };
 
@@ -199,9 +280,9 @@ function historyToMessages(history) {
 
 // 加载指定 thread 的历史并填入 chat.messages
 async function loadThreadHistory(chat) {
-  if (!defaultAgentId.value || !chat.id) return;
+  if (!store.defaultAgentId || !chat.id) return;
   try {
-    const res = await agentApi.getAgentHistory(defaultAgentId.value, chat.id);
+    const res = await agentApi.getAgentHistory(store.defaultAgentId, chat.id);
     const list = res?.history ? historyToMessages(res.history) : [];
     chat.messages = list;
   } catch (err) {
@@ -210,56 +291,66 @@ async function loadThreadHistory(chat) {
   }
 }
 
+// 新对话编号 = 当前用户未删除的对话数 + 1
+const getNextConversationNumber = () => store.chatList.length + 1;
+
+// 将左侧当前选中的对话项滚动到可见区域（新建对话后列表超出屏幕时自动跟到底部）
+const scrollActiveConversationIntoView = () => {
+  nextTick(() => {
+    const active = document.querySelector('.conversation-view-sidebar .conversation-item.active');
+    if (active) active.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  });
+};
+
 // 创建新对话（已登录时调用后端创建 thread 并加入列表）
 const createNewChat = async () => {
-  if (userStore.isLoggedIn && defaultAgentId.value) {
+  const nextNum = getNextConversationNumber();
+  const title = `对话 ${nextNum}`;
+  if (userStore.isLoggedIn && store.defaultAgentId) {
     try {
-      const title = `对话 ${nextChatNumber.value}`;
-      nextChatNumber.value += 1;
-      const thread = await threadApi.createThread(defaultAgentId.value, title);
+      const thread = await threadApi.createThread(store.defaultAgentId, title);
       const newChat = {
         id: thread.id,
         title: thread.title || title,
         messages: [],
         threadId: thread.id
       };
-      chatList.value.push(newChat);
+      store.chatList.push(newChat);
       switchChat(newChat.id);
+      scrollActiveConversationIntoView();
     } catch (err) {
       console.error('创建对话失败:', err);
-      createNewChatLocal();
+      createNewChatLocal(title);
     }
   } else {
-    createNewChatLocal();
+    createNewChatLocal(title);
   }
 };
 
-function createNewChatLocal() {
+function createNewChatLocal(title) {
+  const finalTitle = title || `对话 ${getNextConversationNumber()}`;
   const newChat = {
     id: Date.now().toString(),
-    title: `对话 ${nextChatNumber.value}`,
+    title: finalTitle,
     messages: [],
     threadId: null
   };
-  nextChatNumber.value += 1;
-  chatList.value.push(newChat);
+  store.chatList.push(newChat);
   switchChat(newChat.id);
+  scrollActiveConversationIntoView();
 }
 
 // 切换对话（已登录时从后端拉取该 thread 的历史）
 const switchChat = async (chatId) => {
-  const chat = chatList.value.find((c) => c.id === chatId);
+  const chat = store.findChat(chatId);
   if (!chat) return;
 
-  currentChatId.value = chatId;
-  threadId.value = chat.threadId ?? chat.id;
+  store.setCurrentChatId(chatId);
+  store.setThreadId(chat.threadId ?? chat.id);
   inputMessage.value = '';
 
-  if (userStore.isLoggedIn && defaultAgentId.value) {
+  if (userStore.isLoggedIn && store.defaultAgentId) {
     if (chat.messages.length === 0) await loadThreadHistory(chat);
-    messages.value = chat.messages || [];
-  } else {
-    messages.value = chat.messages || [];
   }
 
   nextTick(() => {
@@ -270,10 +361,10 @@ const switchChat = async (chatId) => {
 
 // 删除对话（已登录时同时删除后端 thread）
 const deleteChat = async (chatId) => {
-  const index = chatList.value.findIndex((c) => c.id === chatId);
+  const index = store.chatList.findIndex((c) => c.id === chatId);
   if (index === -1) return;
 
-  if (userStore.isLoggedIn && defaultAgentId.value) {
+  if (userStore.isLoggedIn && store.defaultAgentId) {
     try {
       await threadApi.deleteThread(chatId);
     } catch (err) {
@@ -281,11 +372,11 @@ const deleteChat = async (chatId) => {
     }
   }
 
-  chatList.value.splice(index, 1);
+  store.chatList.splice(index, 1);
 
-  if (currentChatId.value === chatId) {
-    if (chatList.value.length > 0) {
-      switchChat(chatList.value[0].id);
+  if (store.currentChatId === chatId) {
+    if (store.chatList.length > 0) {
+      switchChat(store.chatList[0].id);
     } else {
       createNewChat();
     }
@@ -293,75 +384,169 @@ const deleteChat = async (chatId) => {
 };
 
 // 发送消息（使用课程对话流接口，由后端根据 DEFAULT_AGENT_ID 决定智能体，固定为 ChatbotAgent）
+// 流式回调内通过 store 更新状态，切到其他页面再切回时仍能保留对话且不打断输出
 const sendMessage = async () => {
   const content = inputMessage.value.trim();
-  if (!content || isLoading.value) return;
+  if (!content || store.isLoading) return;
 
-  const chatIdForThisRequest = currentChatId.value;
-  const chat = chatList.value.find(c => c.id === chatIdForThisRequest);
+  const chatIdForThisRequest = store.currentChatId;
+  const chat = store.findChat(chatIdForThisRequest);
   if (!chat) return;
 
-  activeRequestChatId.value = chatIdForThisRequest;
+  store.setActiveRequestChatId(chatIdForThisRequest);
   chat.messages.push({ role: 'user', content });
   inputMessage.value = '';
   await nextTick();
   scrollToBottom();
 
-  isLoading.value = true;
-  currentAiMessage.value = '';
-  streamController.value = new AbortController();
+  store.setLoading(true);
+  store.clearCurrentAiMessage();
+  store.clearSearchState();
+  const controller = new AbortController();
+  store.setStreamController(controller);
+
+  let tid = store.threadId || chat.threadId || chat.id || Date.now().toString() + Math.random().toString(36).substr(2, 9);
+  if (!chat.threadId) chat.threadId = tid;
+  store.setThreadId(tid);
+
+  // 流式缓冲：减少逐字更新 DOM，每 50ms 或结束时批量写入，使输出更流畅
+  const STREAM_FLUSH_MS = 50;
+  let streamTextBuffer = '';
+  let streamFlushTimer = null;
+  const flushStreamBuffer = () => {
+    if (streamTextBuffer.length === 0) return;
+    const convStore = useCourseConversationStore();
+    convStore.appendCurrentAiMessage(streamTextBuffer);
+    streamTextBuffer = '';
+    if (convStore.currentChatId === chatIdForThisRequest) nextTick(() => scrollToBottom());
+  };
+  const scheduleStreamFlush = () => {
+    if (streamFlushTimer != null) return;
+    streamFlushTimer = setTimeout(() => {
+      streamFlushTimer = null;
+      flushStreamBuffer();
+    }, STREAM_FLUSH_MS);
+  };
 
   try {
-    if (!threadId.value) {
-      threadId.value = chat.threadId || chat.id || Date.now().toString() + Math.random().toString(36).substr(2, 9);
-    }
-    chat.threadId = threadId.value;
-
     await courseChatStream(
       content,
-      threadId.value,
+      tid,
       (chunk) => {
-        const targetChat = chatList.value.find(c => c.id === chatIdForThisRequest);
+        const convStore = useCourseConversationStore();
+        const targetChat = convStore.findChat(chatIdForThisRequest);
         if (!targetChat) return;
 
         if (chunk.status === 'init') {
-          const tid = (chunk.meta && chunk.meta.thread_id) ? chunk.meta.thread_id : chunk.thread_id;
-          if (tid) {
-            threadId.value = tid;
-            targetChat.threadId = tid;
+          const fromChunk = (chunk.meta && chunk.meta.thread_id) ? chunk.meta.thread_id : chunk.thread_id;
+          if (fromChunk) {
+            convStore.setThreadId(fromChunk);
+            targetChat.threadId = fromChunk;
           }
-        } else if (chunk.status === 'loading' && chunk.response !== undefined) {
-          if (chunk.response) {
-            currentAiMessage.value = (currentAiMessage.value || '') + chunk.response;
+        } else if (chunk.status === 'loading') {
+          if (chunk.response !== undefined) {
+            if (chunk.response) {
+              streamTextBuffer += chunk.response;
+              scheduleStreamFlush();
+            }
           }
-          if (currentChatId.value === chatIdForThisRequest) nextTick(() => scrollToBottom());
+          if (chunk.tool_calling?.name && String(chunk.tool_calling.name).toLowerCase().includes('tavily')) {
+            convStore.setSearching(chunk.tool_calling.query || '');
+          }
+          const msg = chunk.msg;
+          const hasToolCalls = Array.isArray(msg?.tool_calls) && msg.tool_calls.length > 0;
+          const isAiLike = msg?.type === 'ai' || msg?.type === 'AIMessage' || msg?.type === 'AIMessageChunk';
+          if (hasToolCalls && isAiLike) {
+            const tavilyCall = msg.tool_calls.find((tc) => (tc.name || tc.function?.name || '').toLowerCase().includes('tavily'));
+            if (tavilyCall) {
+              let q = '';
+              const args = tavilyCall.args ?? tavilyCall.function?.arguments;
+              if (typeof args === 'string') {
+                try {
+                  const p = JSON.parse(args);
+                  q = p.query ?? p.q ?? '';
+                } catch (_) {}
+              } else if (args && typeof args === 'object') {
+                q = args.query ?? args.q ?? '';
+              }
+              convStore.setSearching(q);
+            }
+          }
+          const isTool = msg?.type === 'tool' || msg?.type === 'ToolMessage';
+          if (isTool) {
+            const name = (msg.name || '').toLowerCase();
+            if (name.includes('tavily')) {
+              let raw = msg.content;
+              if (Array.isArray(raw)) {
+                const textBlock = raw.find((b) => b?.type === 'text');
+                raw = textBlock?.text ?? (typeof raw[0] === 'string' ? raw[0] : '');
+              }
+              let list = [];
+              if (typeof raw === 'string') {
+                try {
+                  const data = JSON.parse(raw);
+                  if (Array.isArray(data.results)) {
+                    list = data.results.map((r) => ({ title: r.title || r.url || '', url: r.url || '#' }));
+                  }
+                } catch (_) {}
+              }
+              convStore.appendSearchSources(list);
+            }
+          }
+          if (convStore.currentChatId === chatIdForThisRequest) nextTick(() => scrollToBottom());
         } else if (chunk.status === 'finished') {
-          if (currentAiMessage.value) {
-            targetChat.messages.push({ role: 'ai', content: currentAiMessage.value });
-            if (targetChat.messages.length === 2) summarizeChatTitle(targetChat);
-            currentAiMessage.value = '';
+          if (streamFlushTimer != null) {
+            clearTimeout(streamFlushTimer);
+            streamFlushTimer = null;
           }
-          isLoading.value = false;
-          activeRequestChatId.value = null;
-          if (currentChatId.value === chatIdForThisRequest) nextTick(() => scrollToBottom());
+          flushStreamBuffer();
+          if (convStore.currentAiMessage) {
+            const sources = convStore.searchSources.length ? [...convStore.searchSources] : undefined;
+            targetChat.messages.push({
+              role: 'ai',
+              content: convStore.currentAiMessage,
+              sources
+            });
+            if (targetChat.messages.length === 2) summarizeChatTitle(targetChat).catch(() => {});
+            convStore.clearCurrentAiMessage();
+          }
+          convStore.clearSearchState();
+          convStore.setLoading(false);
+          convStore.setActiveRequestChatId(null);
+          if (convStore.currentChatId === chatIdForThisRequest) nextTick(() => scrollToBottom());
         } else if (chunk.status === 'error') {
+          if (streamFlushTimer != null) {
+            clearTimeout(streamFlushTimer);
+            streamFlushTimer = null;
+          }
+          flushStreamBuffer();
           const errMsg = chunk.error_message || chunk.message || '抱歉，连接服务器失败，请检查网络或稍后再试。';
           targetChat.messages.push({ role: 'ai', content: errMsg });
-          isLoading.value = false;
-          currentAiMessage.value = '';
-          activeRequestChatId.value = null;
-          if (currentChatId.value === chatIdForThisRequest) nextTick(() => scrollToBottom());
+          convStore.setLoading(false);
+          convStore.clearCurrentAiMessage();
+          convStore.setActiveRequestChatId(null);
+          if (convStore.currentChatId === chatIdForThisRequest) nextTick(() => scrollToBottom());
         }
       },
-      { signal: streamController.value.signal }
+      { signal: controller.signal, enableWebSearch: enableWebSearch.value }
     );
   } catch (error) {
-    const targetChat = chatList.value.find(c => c.id === chatIdForThisRequest);
+    if (streamFlushTimer != null) {
+      clearTimeout(streamFlushTimer);
+      streamFlushTimer = null;
+    }
+    flushStreamBuffer();
+    const targetChat = store.findChat(chatIdForThisRequest);
     if (targetChat) {
       if (error.name === 'AbortError') {
-        if (currentAiMessage.value) {
-          targetChat.messages.push({ role: 'ai', content: currentAiMessage.value });
-          if (targetChat.messages.length === 2) summarizeChatTitle(targetChat);
+        if (store.currentAiMessage || store.searchSources.length) {
+          const sources = store.searchSources.length ? [...store.searchSources] : undefined;
+          targetChat.messages.push({
+            role: 'ai',
+            content: store.currentAiMessage || '',
+            ...(sources ? { sources } : {})
+          });
+          if (targetChat.messages.length === 2) summarizeChatTitle(targetChat).catch(() => {});
         }
       } else {
         console.error('发送消息失败:', error);
@@ -369,21 +554,23 @@ const sendMessage = async () => {
         targetChat.messages.push({ role: 'ai', content: networkMsg });
       }
     }
-    currentAiMessage.value = '';
-    isLoading.value = false;
-    activeRequestChatId.value = null;
-    streamController.value = null;
-    if (currentChatId.value === chatIdForThisRequest) await nextTick(() => scrollToBottom());
+    store.clearCurrentAiMessage();
+    store.clearSearchState();
+    store.setLoading(false);
+    store.setActiveRequestChatId(null);
+    store.setStreamController(null);
+    if (store.currentChatId === chatIdForThisRequest) await nextTick(() => scrollToBottom());
   }
 };
 
 const stopStream = () => {
-  if (streamController.value) {
-    streamController.value.abort();
+  if (store.streamController) {
+    store.streamController.abort();
   }
 };
 
 // 初始化：已登录时从后端拉取对话列表并选中第一个；未登录时仅创建本地对话
+// 若 store 中已有数据（如从其他页面切回），则不再覆盖，避免对话消失
 onMounted(async () => {
   if (!document.querySelector('link[href*="font-awesome"]')) {
     const link = document.createElement('link');
@@ -393,7 +580,11 @@ onMounted(async () => {
   }
 
   if (!userStore.isLoggedIn) {
-    if (chatList.value.length === 0) createNewChat();
+    if (store.chatList.length === 0) createNewChat();
+    return;
+  }
+
+  if (store.chatList.length > 0) {
     return;
   }
 
@@ -401,29 +592,28 @@ onMounted(async () => {
     const defaultRes = await agentApi.getDefaultAgent();
     const agentId = defaultRes?.default_agent_id;
     if (!agentId) {
-      if (chatList.value.length === 0) createNewChatLocal();
+      createNewChatLocal();
       return;
     }
-    defaultAgentId.value = agentId;
+    store.setDefaultAgentId(agentId);
 
     const threads = await threadApi.getThreads(agentId);
     const list = Array.isArray(threads) ? threads : [];
-    chatList.value = list.map((t) => ({
+    store.setChatList(list.map((t) => ({
       id: t.id,
       title: t.title || `对话 ${t.id}`,
       messages: [],
       threadId: t.id
-    }));
-    nextChatNumber.value = chatList.value.length + 1;
+    })));
 
-    if (chatList.value.length > 0) {
-      await switchChat(chatList.value[0].id);
+    if (store.chatList.length > 0) {
+      await switchChat(store.chatList[0].id);
     } else {
       createNewChat();
     }
   } catch (err) {
     console.error('加载课程对话列表失败:', err);
-    if (chatList.value.length === 0) createNewChatLocal();
+    createNewChatLocal();
   }
 });
 
@@ -475,14 +665,17 @@ const scrollToBottom = () => {
 .conversation-view-container {
   font-family: -apple-system, BlinkMacSystemFont, 'Noto Sans SC', 'Roboto', sans-serif;
   background-color: var(--gray-50);
+  height: 100vh;
   min-height: 100vh;
   color: var(--dark-text);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
-/* 顶部导航样式 */
+/* 顶部导航样式：固定在顶部，不随内容滚动 */
 .conversation-view-header {
+  flex-shrink: 0;
   background-color: var(--white);
   border-bottom: 1px solid var(--gray-200);
 }
@@ -593,7 +786,7 @@ const scrollToBottom = () => {
   font-weight: 500;
 }
 
-/* 主要内容区样式 */
+/* 主要内容区：仅中间消息区可滚动，左侧与底部固定 */
 .conversation-view-main {
   width: 100%;
   margin: 0;
@@ -607,16 +800,15 @@ const scrollToBottom = () => {
 
 .conversation-view-chat {
   width: 100%;
-  height: calc(100vh - 80px);
+  flex: 1;
+  min-height: 0;
   background-color: var(--white);
   display: flex;
   flex-direction: row;
-  flex: 1;
-  min-height: 0;
   overflow: hidden;
 }
 
-/* 左侧对话列表 */
+/* 左侧对话列表：固定宽度，不随消息区滚动 */
 .conversation-view-sidebar {
   width: 280px;
   min-width: 280px;
@@ -706,50 +898,65 @@ const scrollToBottom = () => {
 }
 
 .conversation-item-delete {
-  background: none;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  background: var(--gray-200);
   border: none;
+  border-radius: 6px;
   cursor: pointer;
-  color: var(--gray-500);
-  padding: 4px;
+  color: #374151;
+  padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0;
-  transition: opacity 0.2s ease, color 0.2s ease;
+  flex-shrink: 0;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
-.conversation-item:hover .conversation-item-delete {
-  opacity: 1;
-}
-
-.conversation-item.active .conversation-item-delete {
-  color: var(--white);
+.conversation-item-delete-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .conversation-item-delete:hover {
-  color: var(--primary-color);
+  background: #fecaca;
+  color: #b91c1c;
 }
 
-/* 右侧对话内容 */
+.conversation-item.active .conversation-item-delete {
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--white);
+}
+
+.conversation-item.active .conversation-item-delete:hover {
+  background: rgba(255, 255, 255, 0.35);
+  color: var(--white);
+}
+
+/* 右侧对话内容：仅消息区可滚动，输入区固定在底部 */
 .conversation-view-content {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
 }
 
-/* 消息区域 */
+/* 消息区域：唯一可滚动区域 */
 .conversation-view-message-box {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 24px;
   background-color: var(--white);
   width: 100%;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  min-height: 0;
 }
 
 .conversation-view-message-item {
@@ -853,14 +1060,173 @@ const scrollToBottom = () => {
   text-overflow: clip;
 }
 
-/* 输入区域 */
+/* 流式输出时减少重排，使文字出现更顺畅 */
+.conversation-view-message-with-spinner .message-text {
+  contain: layout style;
+}
+
+/* Markdown 渲染（marked + v-html）：无额外背景，与气泡一致 */
+.conversation-view-markdown {
+  white-space: normal;
+}
+.conversation-view-markdown h1,
+.conversation-view-markdown h2,
+.conversation-view-markdown h3 {
+  margin: 1em 0 0.5em;
+  font-weight: 600;
+  color: inherit;
+}
+.conversation-view-markdown h1:first-child,
+.conversation-view-markdown h2:first-child,
+.conversation-view-markdown h3:first-child {
+  margin-top: 0;
+}
+.conversation-view-markdown strong {
+  font-weight: 700;
+}
+.conversation-view-markdown p {
+  margin: 0 0 0.5em;
+}
+.conversation-view-markdown p:last-child {
+  margin-bottom: 0;
+}
+.conversation-view-markdown ul,
+.conversation-view-markdown ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+.conversation-view-markdown code {
+  background: var(--gray-200);
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.conversation-view-markdown pre {
+  margin: 0.5em 0;
+  overflow-x: auto;
+}
+.conversation-view-markdown pre code {
+  display: block;
+  padding: 8px 12px;
+}
+
+/* 流式消息末尾的搜索转圈（单独一行，避免被遮挡） */
+.conversation-view-spinner-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  min-height: 22px;
+}
+.conversation-view-spinner-inline {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border: 2px solid var(--gray-200);
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
+  animation: conversation-view-spin 0.8s linear infinite;
+}
+.conversation-view-spinner-label {
+  font-size: 14px;
+  color: var(--gray-500);
+}
+@keyframes conversation-view-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 信息来源（流式加载中） */
+.conversation-view-search-sources {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: var(--gray-0);
+  border-radius: 8px;
+  border: 1px solid var(--gray-200);
+}
+.conversation-view-search-sources .search-sources-title {
+  font-size: 12px;
+  color: var(--gray-500);
+  margin-bottom: 6px;
+}
+.conversation-view-search-sources .search-sources-list {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: 13px;
+}
+.conversation-view-search-sources .search-sources-item {
+  margin-bottom: 4px;
+}
+.conversation-view-search-sources .search-sources-item a {
+  color: var(--primary-color);
+  text-decoration: none;
+}
+.conversation-view-search-sources .search-sources-item a:hover {
+  text-decoration: underline;
+}
+
+/* 历史消息中的参考来源（总结） */
+.conversation-view-msg-sources {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: var(--gray-0);
+  border-radius: 8px;
+  border: 1px solid var(--gray-200);
+}
+.conversation-view-msg-sources .msg-sources-title {
+  font-size: 12px;
+  color: var(--gray-500);
+  margin-bottom: 6px;
+}
+.conversation-view-msg-sources .msg-sources-list {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: 13px;
+}
+.conversation-view-msg-sources .msg-sources-item {
+  margin-bottom: 4px;
+}
+.conversation-view-msg-sources .msg-sources-item a {
+  color: var(--primary-color);
+  text-decoration: none;
+}
+.conversation-view-msg-sources .msg-sources-item a:hover {
+  text-decoration: underline;
+}
+
+/* 输入区域：固定在底部，不随消息滚动 */
+.conversation-view-input-wrap {
+  flex-shrink: 0;
+  border-top: 1px solid var(--gray-200);
+  background-color: var(--white);
+}
+
+.conversation-view-web-search-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 24px 0;
+  margin: 0;
+  font-size: 14px;
+  color: var(--gray-600);
+  cursor: pointer;
+  user-select: none;
+}
+
+.conversation-view-web-search-cb {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary-color);
+  cursor: pointer;
+}
+
 .conversation-view-input-area {
   display: flex;
   align-items: center;
   gap: 0;
   padding: 16px 24px;
-  border-top: 1px solid var(--gray-200);
-  background-color: var(--white);
   box-sizing: border-box;
 }
 

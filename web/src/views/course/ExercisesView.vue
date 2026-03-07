@@ -1,6 +1,5 @@
 <template>
   <div class="exercises-container">
-    <!-- 顶部导航 -->
     <header class="exercises-header">
       <div class="exercises-header-content">
         <router-link to="/" class="exercises-logo">
@@ -12,6 +11,7 @@
             <router-link to="/exercises" class="exercises-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
             <router-link to="/reading" class="exercises-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
             <router-link to="/videos" class="exercises-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
+            <router-link v-if="userStore.isAdmin" to="/ops" class="exercises-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
           </div>
           <div class="exercises-auth">
             <template v-if="!userStore.isLoggedIn">
@@ -19,6 +19,11 @@
               <router-link to="/register" class="exercises-auth-link primary">注册</router-link>
             </template>
             <template v-else>
+              <router-link to="/mall" class="exercises-points-link" title="积分商城">
+                <span class="exercises-points-num">{{ pointsDisplay }}</span>
+                <span class="exercises-points-label">积分</span>
+              </router-link>
+              <button type="button" class="exercises-auth-btn" @click="openWrongModal">错题分析</button>
               <span class="exercises-username">{{ userStore.username || userStore.userIdLogin }}</span>
               <button type="button" class="exercises-auth-btn" @click="handleSwitchAccount">切换账号</button>
               <button type="button" class="exercises-auth-btn" @click="handleLogout">退出</button>
@@ -28,134 +33,314 @@
       </div>
     </header>
 
-    <!-- 主要内容区 -->
     <main class="exercises-main">
-      <!-- 标题部分 -->
       <div class="exercises-title-section">
         <h1 class="exercises-title">习题推荐</h1>
-        <p class="exercises-subtitle">个性化习题匹配，巩固薄弱点，提升学习效率</p>
+        <p class="exercises-subtitle">选择题型与知识点，智能体出题；答对积 1 分，可到积分商城兑换称号</p>
       </div>
 
-      <!-- 按章节出题 -->
-      <div class="exercises-chapters-section">
-        <h2 class="exercises-list-title">章节练习</h2>
-        <p class="exercises-chapters-hint">选择章节生成或查看该章节的习题</p>
-        <div class="exercises-chapters-grid">
-          <div
+      <!-- 题型 + 知识点选择 -->
+      <section class="exercises-select-section">
+        <h2 class="exercises-section-title">选择题型</h2>
+        <div class="exercises-type-row">
+          <button
+            v-for="t in questionTypes"
+            :key="t.value"
+            type="button"
+            class="exercises-type-btn"
+            :class="{ active: selectedType === t.value }"
+            @click="selectedType = t.value"
+          >
+            {{ t.label }}
+          </button>
+        </div>
+
+        <h2 class="exercises-section-title">选择知识点</h2>
+        <div class="exercises-knowledge-grid">
+          <button
             v-for="ch in chapters"
             :key="ch.id"
-            class="exercises-chapter-card"
+            type="button"
+            class="exercises-knowledge-btn"
+            :class="{ active: selectedKnowledge === ch.title }"
+            @click="selectedKnowledge = ch.title"
           >
-            <h3 class="exercises-chapter-title">{{ ch.title }}</h3>
-            <p class="exercises-chapter-desc">{{ ch.desc }}</p>
-            <div class="exercises-chapter-actions">
-              <button
-                class="exercises-chapter-btn primary"
-                :disabled="chapterGenerating === ch.id"
-                @click="generateForChapter(ch.id)"
-              >
-                <i class="fa fa-magic"></i>
-                {{ chapterGenerating === ch.id ? '生成中…' : '生成题目' }}
-              </button>
-              <button
-                class="exercises-chapter-btn secondary"
-                @click="viewChapterQuestions(ch.id)"
-              >
-                <i class="fa fa-list"></i> 查看题目
-              </button>
+            {{ ch.title }}
+          </button>
+        </div>
+
+        <div class="exercises-generate-row">
+          <button
+            type="button"
+            class="exercises-generate-btn"
+            :disabled="!selectedType || !selectedKnowledge || generating"
+            @click="doGenerate"
+          >
+            {{ generating ? '生成中…' : '生成题目' }}
+          </button>
+        </div>
+      </section>
+
+      <!-- 题目与作答 -->
+      <section v-if="currentQuestion.content" class="exercises-question-section">
+        <div class="exercises-question-card">
+          <div class="exercises-question-body">
+            <p class="exercises-question-text">{{ currentQuestion.content }}</p>
+          </div>
+          <div v-if="!submitted" class="exercises-answer-area">
+            <textarea
+              v-model="userAnswer"
+              class="exercises-answer-input"
+              placeholder="请输入你的答案（仅可提交一次）"
+              rows="4"
+            />
+            <button
+              type="button"
+              class="exercises-submit-btn"
+              :disabled="!userAnswer.trim() || submitting"
+              @click="doSubmit"
+            >
+              {{ submitting ? '批改中…' : '提交答案' }}
+            </button>
+          </div>
+          <div v-else class="exercises-result-area">
+            <div class="exercises-result-badge" :class="resultCorrect ? 'correct' : 'wrong'">
+              {{ resultCorrect ? '回答正确' : '回答错误' }}
             </div>
-            <div v-if="selectedChapterId === ch.id && chapterQuestions.length > 0" class="exercises-chapter-questions">
-              <div
-                v-for="(q, qIdx) in chapterQuestions"
-                :key="qIdx"
-                class="exercises-question-item"
-              >
-                <span class="exercises-question-num">第 {{ qIdx + 1 }} 题</span>
-                <p class="exercises-question-text">{{ q.content }}</p>
-              </div>
-            </div>
-            <div v-else-if="selectedChapterId === ch.id" class="exercises-chapter-empty">
-              暂无题目，请先点击「生成题目」
-            </div>
+            <p class="exercises-result-answer">你的答案：{{ userAnswer }}</p>
+            <p v-if="resultExplanation" class="exercises-result-explanation">{{ resultExplanation }}</p>
+            <button type="button" class="exercises-next-btn" @click="resetQuestion">再做一题</button>
           </div>
         </div>
-      </div>
+      </section>
+      <section v-else class="exercises-empty-hint">
+        请选择题型与知识点，点击「生成题目」开始练习。
+      </section>
     </main>
+
+    <!-- 错题分析弹窗 -->
+    <a-modal
+      v-model:open="wrongModalVisible"
+      title="错题情况分析"
+      width="720"
+      :footer="null"
+      destroy-on-close
+      @afterOpenChange="onWrongModalOpen"
+    >
+      <div class="wrong-modal-content">
+        <div ref="wrongChartRef" class="wrong-chart" />
+        <div class="wrong-list">
+          <h4>错题记录</h4>
+          <div v-if="wrongList.length === 0" class="wrong-list-empty">暂无错题记录</div>
+          <div v-else class="wrong-list-items">
+            <div v-for="item in wrongList" :key="item.id" class="wrong-list-item">
+              <p class="wrong-item-question">{{ item.question_content }}</p>
+              <p class="wrong-item-meta">知识点：{{ item.knowledge_point }} · 你的答案：{{ item.user_answer }}</p>
+              <p v-if="item.explanation" class="wrong-item-explanation">{{ item.explanation }}</p>
+            </div>
+          </div>
+          <a-pagination
+            v-if="wrongTotal > pageSize"
+            v-model:current="wrongPage"
+            :total="wrongTotal"
+            :page-size="pageSize"
+            show-size-changer="false"
+            @change="loadWrongList"
+          />
+        </div>
+      </div>
+    </a-modal>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { useRouter, RouterLink } from 'vue-router'
+import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import * as echarts from 'echarts'
+import {
+  exerciseGenerate,
+  exerciseSubmit,
+  exerciseWrongStats,
+  exerciseWrongList,
+  getPoints
+} from '@/apis/courseApi'
 
 const router = useRouter()
 const userStore = useUserStore()
-const handleLogout = () => { userStore.logout(); router.push('/course') }
-const handleSwitchAccount = () => { userStore.logout(); router.push('/login') }
-
-// 按章节出题：计算机网络 第1–6章
-const chapters = [
-  { id: 1, title: '第1章 计算机网络和因特网', desc: '概述、网络边缘与核心、接入网与物理媒体' },
-  { id: 2, title: '第2章 应用层', desc: '应用层协议、HTTP、DNS、P2P 等' },
-  { id: 3, title: '第3章 传输层', desc: '多路复用、UDP、TCP、拥塞控制' },
-  { id: 4, title: '第4章 网络层', desc: 'IP、路由、IPv4/IPv6' },
-  { id: 5, title: '第5章 链路层', desc: '以太网、交换机、ARP' },
-  { id: 6, title: '第6章 无线网络与移动网络', desc: 'WiFi、移动 IP、4G/5G 概述' }
-]
-
-const chapterGenerating = ref(null)
-const selectedChapterId = ref(null)
-const chapterQuestions = ref([])
-
-const generateForChapter = (chapterId) => {
-  chapterGenerating.value = chapterId
-  // 占位：后续可对接按章节生成题目的 API
-  setTimeout(() => {
-    chapterGenerating.value = null
-    chapterQuestions.value = []
-    selectedChapterId.value = null
-  }, 1500)
+const handleLogout = () => {
+  userStore.logout()
+  router.push('/course')
+}
+const handleSwitchAccount = () => {
+  userStore.logout()
+  router.push('/login')
 }
 
-const viewChapterQuestions = (chapterId) => {
-  if (selectedChapterId.value === chapterId) {
-    selectedChapterId.value = null
-    chapterQuestions.value = []
-    return
+const questionTypes = [
+  { value: 'choice', label: '选择题' },
+  { value: 'fill', label: '填空题' },
+  { value: 'short_answer', label: '简答题' }
+]
+
+const chapters = [
+  { id: 1, title: '第1章 计算机网络和因特网' },
+  { id: 2, title: '第2章 应用层' },
+  { id: 3, title: '第3章 传输层' },
+  { id: 4, title: '第4章 网络层' },
+  { id: 5, title: '第5章 链路层' },
+  { id: 6, title: '第6章 无线网络与移动网络' }
+]
+
+const selectedType = ref('')
+const selectedKnowledge = ref('')
+const generating = ref(false)
+const currentQuestion = ref({ content: '', correct_answer: '', scoring_points: [], question_type: '' })
+const userAnswer = ref('')
+const submitted = ref(false)
+const submitting = ref(false)
+const resultCorrect = ref(false)
+const resultExplanation = ref('')
+const pointsDisplay = computed(() => userStore.userPoints === null ? '—' : (userStore.userPoints ?? 0))
+
+const wrongModalVisible = ref(false)
+const wrongChartRef = ref(null)
+const wrongStats = ref([])
+const wrongList = ref([])
+const wrongTotal = ref(0)
+const wrongPage = ref(1)
+const pageSize = 20
+
+async function loadPoints() {
+  if (!userStore.isLoggedIn) return
+  try {
+    const res = await getPoints()
+    userStore.setUserPoints(res.points ?? 0)
+  } catch (_) {}
+}
+
+async function doGenerate() {
+  if (!selectedType.value || !selectedKnowledge.value) return
+  generating.value = true
+  currentQuestion.value = {}
+  userAnswer.value = ''
+  submitted.value = false
+  try {
+    const res = await exerciseGenerate(selectedType.value, selectedKnowledge.value)
+    currentQuestion.value = {
+      content: res.content || '',
+      correct_answer: res.correct_answer || '',
+      scoring_points: res.scoring_points || [],
+      question_type: res.question_type || selectedType.value
+    }
+  } catch (e) {
+    console.error(e)
+  } finally {
+    generating.value = false
   }
-  selectedChapterId.value = chapterId
-  // 占位：后续可对接按章节获取题目列表的 API
-  chapterQuestions.value = []
+}
+
+async function doSubmit() {
+  if (!userAnswer.value.trim() || !currentQuestion.value.content) return
+  submitting.value = true
+  try {
+    const res = await exerciseSubmit({
+      question_type: currentQuestion.value.question_type,
+      knowledge_point: selectedKnowledge.value,
+      question_content: currentQuestion.value.content,
+      correct_answer: currentQuestion.value.correct_answer,
+      scoring_points: currentQuestion.value.scoring_points || [],
+      user_answer: userAnswer.value.trim()
+    })
+    resultCorrect.value = res.is_correct === 1
+    resultExplanation.value = res.explanation || ''
+    submitted.value = true
+    await loadPoints()
+  } catch (e) {
+    console.error(e)
+  } finally {
+    submitting.value = false
+  }
+}
+
+function resetQuestion() {
+  currentQuestion.value = {}
+  userAnswer.value = ''
+  submitted.value = false
+  resultExplanation.value = ''
+}
+
+function openWrongModal() {
+  wrongModalVisible.value = true
+}
+
+async function onWrongModalOpen(open) {
+  if (!open) return
+  await loadWrongStats()
+  await loadWrongList()
+  drawWrongChart()
+}
+
+async function loadWrongStats() {
+  try {
+    const res = await exerciseWrongStats()
+    wrongStats.value = res.by_knowledge_point || []
+  } catch (_) {
+    wrongStats.value = []
+  }
+}
+
+async function loadWrongList() {
+  try {
+    const res = await exerciseWrongList(wrongPage.value, pageSize)
+    wrongList.value = res.items || []
+    wrongTotal.value = res.total || 0
+  } catch (_) {
+    wrongList.value = []
+    wrongTotal.value = 0
+  }
+}
+
+function drawWrongChart() {
+  if (!wrongChartRef.value || !wrongStats.value.length) return
+  const chart = echarts.init(wrongChartRef.value)
+  const data = wrongStats.value.map((s) => ({ name: s.name, value: s.count }))
+  chart.setOption({
+    tooltip: { trigger: 'item' },
+    color: ['#3996ae', '#5ad8a6', '#f6bd16', '#f27c7c', '#9581cc', '#6dc8ec'],
+    series: [
+      {
+        type: 'pie',
+        radius: ['40%', '70%'],
+        avoidLabelOverlap: false,
+        label: { show: true, formatter: '{b}：{c} 次' },
+        data
+      }
+    ]
+  })
 }
 
 onMounted(() => {
-  if (!document.querySelector('link[href*="font-awesome"]')) {
-    const link = document.createElement('link')
-    link.href = 'https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css'
-    link.rel = 'stylesheet'
-    document.head.appendChild(link)
-  }
+  loadPoints()
 })
 </script>
 
 <style scoped>
-/* 颜色变量 */
+/* 与课程智能体其他界面一致（VideosView / ConversationView） */
 :root {
-  --primary-color: #1A365D;      /* 深蓝主色 */
-  --secondary-color: #FF7D00;    /* 橙色强调色 */
-  --light-bg: #F7F9FC;          /* 浅色背景 */
-  --dark-text: #2D3748;         /* 深色文字 */
-  --gray-500: #6B7280;          /* 灰色文字 */
-  --gray-600: #4B5563;          /* 更深灰色文字 */
-  --white: #FFFFFF;             /* 白色 */
-  --gray-200: #E5E7EB;          /* 浅灰色边框 */
-  --gray-50: #F9FAFB;           /* 最浅灰色背景 */
+  --primary-color: #1A365D;
+  --secondary-color: #FF7D00;
+  --light-bg: #F7F9FC;
+  --dark-text: #2D3748;
+  --gray-500: #6B7280;
+  --gray-600: #4B5563;
+  --white: #FFFFFF;
+  --gray-200: #E5E7EB;
+  --gray-50: #F9FAFB;
   --shadow-light: 0 4px 20px rgba(0, 0, 0, 0.05);
   --shadow-hover: 0 10px 25px rgba(0, 0, 0, 0.1);
 }
 
-/* 容器样式 */
 .exercises-container {
   font-family: -apple-system, BlinkMacSystemFont, 'Noto Sans SC', 'Roboto', sans-serif;
   background-color: var(--gray-50);
@@ -163,7 +348,6 @@ onMounted(() => {
   color: var(--dark-text);
 }
 
-/* 顶部导航样式 */
 .exercises-header {
   background-color: var(--white);
   border-bottom: 1px solid var(--gray-200);
@@ -199,57 +383,6 @@ onMounted(() => {
   gap: 32px;
 }
 
-.exercises-auth {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.exercises-auth-link {
-  color: var(--gray-500);
-  text-decoration: none;
-  font-size: 14px;
-  padding: 6px 12px;
-  border-radius: 6px;
-  transition: color 0.2s, background 0.2s;
-}
-
-.exercises-auth-link:hover {
-  color: var(--primary-color);
-}
-
-.exercises-auth-link.primary {
-  color: var(--white);
-  background: var(--primary-color);
-}
-
-.exercises-auth-link.primary:hover {
-  background: #153e68;
-  color: var(--white);
-}
-
-.exercises-username {
-  font-size: 14px;
-  color: var(--gray-600);
-  margin-right: 4px;
-}
-
-.exercises-auth-btn {
-  font-size: 14px;
-  padding: 6px 12px;
-  border: 1px solid var(--gray-200);
-  border-radius: 6px;
-  background: var(--white);
-  color: var(--gray-600);
-  cursor: pointer;
-  transition: color 0.2s, border-color 0.2s;
-}
-
-.exercises-auth-btn:hover {
-  color: var(--primary-color);
-  border-color: var(--primary-color);
-}
-
 .exercises-nav {
   display: flex;
   align-items: center;
@@ -272,7 +405,51 @@ onMounted(() => {
   font-weight: 500;
 }
 
-/* 主要内容区样式 */
+.exercises-auth {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.exercises-points-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background-color: var(--light-bg);
+  color: var(--primary-color);
+  text-decoration: none;
+  font-size: 14px;
+  transition: color 0.2s, background 0.2s;
+}
+
+.exercises-points-num {
+  font-weight: 600;
+}
+
+.exercises-username {
+  font-size: 14px;
+  color: var(--gray-600);
+  margin-right: 4px;
+}
+
+.exercises-auth-btn {
+  font-size: 14px;
+  padding: 6px 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  background-color: var(--white);
+  color: var(--gray-600);
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.exercises-auth-btn:hover {
+  color: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
 .exercises-main {
   width: 100%;
   max-width: 1000px;
@@ -280,7 +457,6 @@ onMounted(() => {
   padding: 32px 24px;
 }
 
-/* 标题部分 */
 .exercises-title-section {
   text-align: center;
   margin-bottom: 32px;
@@ -299,134 +475,252 @@ onMounted(() => {
   margin: 0 auto;
 }
 
-/* 按章节出题 */
-.exercises-chapters-section {
-  margin-bottom: 40px;
+.exercises-select-section {
+  margin-bottom: 32px;
 }
 
-.exercises-list-title {
+.exercises-section-title {
   font-size: 20px;
   font-weight: 600;
   color: var(--primary-color);
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
-.exercises-chapters-hint {
-  color: var(--gray-600);
-  font-size: 14px;
-  margin-bottom: 24px;
-}
-
-.exercises-chapters-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 20px;
-}
-
-.exercises-chapter-card {
-  background-color: var(--white);
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: var(--shadow-light);
-  transition: box-shadow 0.3s ease;
-}
-
-.exercises-chapter-card:hover {
-  box-shadow: var(--shadow-hover);
-}
-
-.exercises-chapter-title {
-  font-size: 17px;
-  font-weight: 600;
-  color: var(--primary-color);
-  margin: 0 0 8px 0;
-}
-
-.exercises-chapter-desc {
-  font-size: 13px;
-  color: var(--gray-600);
-  margin: 0 0 16px 0;
-  line-height: 1.5;
-}
-
-.exercises-chapter-actions {
+.exercises-type-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
+  margin-bottom: 20px;
 }
 
-.exercises-chapter-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  border-radius: 8px;
+.exercises-type-btn {
+  padding: 8px 16px;
+  border: 1px solid var(--gray-200);
+  border-radius: 20px;
+  background-color: var(--white);
+  color: var(--gray-600);
   font-size: 14px;
   cursor: pointer;
-  border: none;
-  transition: background-color 0.2s ease;
+  transition: all 0.3s ease;
+  white-space: nowrap;
 }
 
-.exercises-chapter-btn.primary {
+.exercises-type-btn:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.exercises-type-btn.active {
   background-color: var(--primary-color);
   color: var(--white);
+  border-color: var(--primary-color);
 }
 
-.exercises-chapter-btn.primary:hover:not(:disabled) {
+.exercises-knowledge-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.exercises-knowledge-btn {
+  padding: 8px 16px;
+  border: 1px solid var(--gray-200);
+  border-radius: 20px;
+  background-color: var(--white);
+  color: var(--gray-600);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.exercises-knowledge-btn:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.exercises-knowledge-btn.active {
+  background-color: var(--primary-color);
+  color: var(--white);
+  border-color: var(--primary-color);
+}
+
+.exercises-generate-row {
+  margin-top: 16px;
+}
+
+.exercises-generate-btn {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 8px;
+  background-color: var(--primary-color);
+  color: var(--white);
+  font-size: 15px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.exercises-generate-btn:hover:not(:disabled) {
   background-color: #153e68;
 }
 
-.exercises-chapter-btn.primary:disabled {
+.exercises-generate-btn:disabled {
   opacity: 0.7;
   cursor: not-allowed;
 }
 
-.exercises-chapter-btn.secondary {
-  background-color: var(--light-bg);
-  color: var(--primary-color);
-  border: 1px solid var(--gray-200);
+.exercises-question-section {
+  margin-top: 24px;
 }
 
-.exercises-chapter-btn.secondary:hover {
-  background-color: var(--gray-200);
+.exercises-question-card {
+  background-color: var(--white);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: var(--shadow-light);
+  transition: all 0.3s ease;
 }
 
-.exercises-chapter-questions {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--gray-200);
-}
-
-.exercises-question-item {
-  margin-bottom: 12px;
-}
-
-.exercises-question-num {
-  font-size: 12px;
-  color: var(--gray-500);
-  margin-right: 8px;
+.exercises-question-body {
+  margin-bottom: 20px;
 }
 
 .exercises-question-text {
-  margin: 4px 0 0 0;
+  font-size: 15px;
+  line-height: 1.7;
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--dark-text);
+}
+
+.exercises-answer-area textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
   font-size: 14px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.exercises-submit-btn {
+  margin-top: 12px;
+  padding: 8px 20px;
+  border: none;
+  border-radius: 8px;
+  background-color: var(--primary-color);
+  color: var(--white);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.exercises-submit-btn:hover:not(:disabled) {
+  background-color: #153e68;
+}
+
+.exercises-submit-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.exercises-result-area {
+  padding-top: 12px;
+}
+
+.exercises-result-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.exercises-result-badge.correct {
+  background-color: #d1fae8;
+  color: #047857;
+}
+
+.exercises-result-badge.wrong {
+  background-color: #fee2e2;
+  color: #b91c1c;
+}
+
+.exercises-result-answer,
+.exercises-result-explanation {
+  font-size: 14px;
+  color: var(--gray-600);
+  margin: 4px 0;
+  line-height: 1.5;
+}
+
+.exercises-next-btn {
+  margin-top: 16px;
+  padding: 8px 20px;
+  border: 1px solid var(--primary-color);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--primary-color);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.exercises-next-btn:hover {
+  background-color: var(--light-bg);
+}
+
+.exercises-empty-hint {
+  text-align: center;
+  color: var(--gray-500);
+  font-size: 14px;
+  padding: 40px 0;
+}
+
+/* 错题弹窗 */
+.wrong-modal-content {
+  min-height: 320px;
+}
+
+.wrong-chart {
+  height: 260px;
+  margin-bottom: 20px;
+}
+
+.wrong-list h4 {
+  font-size: 14px;
+  color: var(--dark-text);
+  margin: 0 0 12px 0;
+}
+
+.wrong-list-empty {
+  color: var(--gray-500);
+  font-size: 14px;
+  padding: 16px 0;
+}
+
+.wrong-list-item {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--gray-200);
+  font-size: 13px;
+}
+
+.wrong-item-question {
+  margin: 0 0 6px 0;
   color: var(--dark-text);
   line-height: 1.5;
 }
 
-.exercises-chapter-empty {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--gray-200);
-  font-size: 14px;
+.wrong-item-meta {
+  margin: 0 0 4px 0;
   color: var(--gray-500);
 }
 
-/* 响应式设计 */
-@media (min-width: 768px) {
-  .exercises-chapters-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
+.wrong-item-explanation {
+  margin: 0;
+  color: var(--gray-600);
+  line-height: 1.4;
 }
 
 @media (max-width: 639px) {
@@ -435,33 +729,21 @@ onMounted(() => {
     gap: 16px;
     padding: 16px;
   }
-
   .exercises-logo-text {
     white-space: normal;
     text-align: center;
   }
-  
   .exercises-nav {
     gap: 16px;
   }
-  
   .exercises-nav-link {
     font-size: 14px;
   }
-  
   .exercises-title {
     font-size: 2rem;
   }
-  
   .exercises-main {
     padding: 24px 16px;
-  }
-  
-  .exercises-card-header,
-  .exercises-card-footer {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
   }
 }
 </style>

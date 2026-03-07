@@ -16,6 +16,8 @@
 - `GET /api/course/books/{book_id}/pages`：课本页数
 - `GET /api/course/books/{book_id}/page/{page_num}`：课本某一页图片
 - `POST /api/course/books/ocr`：选区 OCR（优先 PaddleOCR → RapidOCR → PDF 文本兜底）
+- `GET /api/course/reading-position?book_id=xxx`：获取当前用户某本书的阅读页码（需登录，永久记录）
+- `PUT /api/course/reading-position`：保存当前用户某本书的阅读页码（需登录，body: `{ book_id, page }`）
 - `GET /api/course/videos`：视频列表（按章节）
 - `GET /api/course/videos/{video_id}`：视频文件流
 

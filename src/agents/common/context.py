@@ -91,6 +91,14 @@ class BaseContext:
         },
     )
 
+    enable_web_search: bool = field(
+        default=False,
+        metadata={
+            "name": "启用网络搜索",
+            "description": "是否允许智能体调用网络搜索工具（如 Tavily）查询实时信息。需在系统配置中开启网络搜索并配置 API Key。",
+        },
+    )
+
     @classmethod
     def from_file(cls, module_name: str, input_context: dict = None) -> "BaseContext":
         """Load configuration from a YAML file. 用于持久化配置"""

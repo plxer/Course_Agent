@@ -97,6 +97,7 @@ class ConversationListItem(BaseModel):
 
     thread_id: str
     user_id: str
+    user_login: str | None = None  # 用户登录名，便于运维展示
     agent_id: str
     title: str
     status: str
@@ -110,6 +111,7 @@ class ConversationDetailResponse(BaseModel):
 
     thread_id: str
     user_id: str
+    user_login: str | None = None
     agent_id: str
     title: str
     status: str
@@ -136,17 +138,30 @@ async def get_all_conversations(
     current_user: User = Depends(get_admin_user),
 ):
     """获取所有对话（管理员权限）"""
-    from src.storage.postgres.models_business import Conversation, ConversationStats
+    from src.storage.postgres.models_business import Conversation, ConversationStats, User
 
     try:
-        # Build query
-        query = select(Conversation, ConversationStats).outerjoin(
-            ConversationStats, Conversation.id == ConversationStats.conversation_id
+        # 与 User 表关联，便于展示登录名（Conversation.user_id 可能存的是 User.id 或 User.user_id）
+        user_join = or_(
+            Conversation.user_id == User.user_id,
+            Conversation.user_id == cast(User.id, String),
+        )
+        query = (
+            select(Conversation, ConversationStats, User)
+            .outerjoin(ConversationStats, Conversation.id == ConversationStats.conversation_id)
+            .outerjoin(User, user_join)
         )
 
-        # Apply filters
-        if user_id:
-            query = query.filter(Conversation.user_id == user_id)
+        # Apply filters（用户筛选：以输入内容开头的用户，匹配 conversation.user_id 或关联的 User.user_id / User.id）
+        if user_id and user_id.strip():
+            prefix = user_id.strip()
+            query = query.filter(
+                or_(
+                    Conversation.user_id.startswith(prefix),
+                    User.user_id.startswith(prefix),
+                    cast(User.id, String).startswith(prefix),
+                )
+            )
         if agent_id:
             query = query.filter(Conversation.agent_id == agent_id)
         if status != "all":
@@ -162,6 +177,7 @@ async def get_all_conversations(
             {
                 "thread_id": conv.thread_id,
                 "user_id": conv.user_id,
+                "user_login": u.user_id if u else None,
                 "agent_id": conv.agent_id,
                 "title": conv.title,
                 "status": conv.status,
@@ -169,7 +185,7 @@ async def get_all_conversations(
                 "created_at": conv.created_at.isoformat(),
                 "updated_at": conv.updated_at.isoformat(),
             }
-            for conv, stats in results
+            for conv, stats, u in results
         ]
     except Exception as e:
         logger.error(f"Error getting conversations: {e}")
@@ -184,12 +200,26 @@ async def get_conversation_detail(
     current_user: User = Depends(get_admin_user),
 ):
     """获取指定对话详情（管理员权限）"""
+    from src.storage.postgres.models_business import User
+
     try:
         conv_manager = ConversationRepository(db)
         conversation = await conv_manager.get_conversation_by_thread_id(thread_id)
 
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
+
+        # 解析用户登录名：Conversation.user_id 可能存 User.id 或 User.user_id
+        user_login = None
+        by_login = await db.execute(select(User).where(User.user_id == conversation.user_id))
+        u = by_login.scalar_one_or_none()
+        if u:
+            user_login = u.user_id
+        else:
+            by_id = await db.execute(select(User).where(cast(User.id, String) == conversation.user_id))
+            u = by_id.scalar_one_or_none()
+            if u:
+                user_login = u.user_id
 
         # Get messages and stats
         messages = await conv_manager.get_messages(conversation.id)
@@ -224,6 +254,7 @@ async def get_conversation_detail(
         return {
             "thread_id": conversation.thread_id,
             "user_id": conversation.user_id,
+            "user_login": user_login,
             "agent_id": conversation.agent_id,
             "title": conversation.title,
             "status": conversation.status,
@@ -239,6 +270,57 @@ async def get_conversation_detail(
         logger.error(f"Error getting conversation detail: {e}")
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to get conversation detail: {str(e)}")
+
+
+class ExerciseAttemptListItem(BaseModel):
+    """做题记录列表项（运维）"""
+
+    id: int
+    user_login: str
+    question_type: str
+    knowledge_point: str
+    is_correct: int
+    created_at: str
+
+
+@dashboard.get("/exercise-attempts", response_model=list[ExerciseAttemptListItem])
+async def get_exercise_attempts(
+    limit: int = 50,
+    offset: int = 0,
+    user_login: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_admin_user),
+):
+    """获取做题记录列表（管理员权限，课程运维用）。可选 user_login 按登录名前缀筛选。"""
+    from src.storage.postgres.models_business import ExerciseAttempt
+
+    try:
+        query = (
+            select(ExerciseAttempt, User.user_id)
+            .join(User, ExerciseAttempt.user_id == User.id)
+            .order_by(ExerciseAttempt.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        if user_login and user_login.strip():
+            query = query.where(User.user_id.startswith(user_login.strip()))
+        result = await db.execute(query)
+        rows = result.all()
+        return [
+            {
+                "id": att.id,
+                "user_login": login or str(att.user_id),
+                "question_type": att.question_type,
+                "knowledge_point": att.knowledge_point,
+                "is_correct": att.is_correct,
+                "created_at": att.created_at.isoformat(),
+            }
+            for att, login in rows
+        ]
+    except Exception as e:
+        logger.error(f"Error getting exercise attempts: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to get exercise attempts: {str(e)}")
 
 
 # =============================================================================
@@ -586,9 +668,16 @@ async def get_dashboard_stats(
     current_user: User = Depends(get_admin_user),
 ):
     """获取基础统计（管理员权限）"""
-    from src.storage.postgres.models_business import Conversation, Message, MessageFeedback
+    from src.storage.postgres.models_business import Conversation, Message, MessageFeedback, User
 
     try:
+        now = utc_now()
+        naive_now = now.replace(tzinfo=None)
+        user_join_condition = or_(
+            Conversation.user_id == User.user_id,
+            Conversation.user_id == cast(User.id, String),
+        )
+
         # Basic counts
         total_conversations_result = await db.execute(select(func.count(Conversation.id)))
         total_conversations = total_conversations_result.scalar() or 0
@@ -603,6 +692,24 @@ async def get_dashboard_stats(
 
         total_users_result = await db.execute(select(func.count(User.id)).filter(User.is_deleted == 0))
         total_users = total_users_result.scalar() or 0
+
+        # 24h 活跃用户数（课程运维用）
+        active_users_24h_result = await db.execute(
+            select(func.count(distinct(User.id)))
+            .select_from(Conversation)
+            .join(User, user_join_condition)
+            .filter(Conversation.updated_at >= naive_now - timedelta(days=1), User.is_deleted == 0)
+        )
+        active_users_24h = active_users_24h_result.scalar() or 0
+
+        # 做题记录总数（课程运维用）
+        total_exercise_attempts = 0
+        try:
+            from src.storage.postgres.models_business import ExerciseAttempt
+            ex_result = await db.execute(select(func.count(ExerciseAttempt.id)))
+            total_exercise_attempts = ex_result.scalar() or 0
+        except Exception:
+            pass
 
         # Feedback statistics
         total_feedbacks_result = await db.execute(select(func.count(MessageFeedback.id)))
@@ -621,6 +728,8 @@ async def get_dashboard_stats(
             "active_conversations": active_conversations,
             "total_messages": total_messages,
             "total_users": total_users,
+            "active_users_24h": active_users_24h,
+            "total_exercise_attempts": total_exercise_attempts,
             "feedback_stats": {
                 "total_feedbacks": total_feedbacks,
                 "satisfaction_rate": satisfaction_rate,
@@ -729,6 +838,56 @@ class TimeSeriesStats(BaseModel):
     peak_date: str
 
 
+@dashboard.get("/stats/calls/debug")
+async def get_call_stats_debug(db: AsyncSession = Depends(get_db)):
+    """调试用：返回近14天会话数、AI消息数及 agents 查询的原始行，便于排查调用统计无数据。无需登录（仅聚合统计，无敏感信息）。"""
+    from src.storage.postgres.models_business import Conversation, Message
+
+    now = utc_now()
+    start_time = (now - timedelta(days=13)).replace(tzinfo=None)
+
+    conv_count = await db.execute(select(func.count(Conversation.id)).filter(Conversation.updated_at >= start_time))
+    msg_count = await db.execute(
+        select(func.count(Message.id)).filter(
+            Message.role == "assistant",
+            Message.created_at >= start_time,
+        )
+    )
+    date_expr_msg = func.to_char(func.date_trunc("day", Message.created_at), "YYYY-MM-DD")
+    msg_with_conv = await db.execute(
+        select(
+            date_expr_msg.label("date"),
+            func.count(Message.id).label("count"),
+            Conversation.agent_id.label("category"),
+        )
+        .select_from(Message)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .filter(Message.role == "assistant", Message.created_at >= start_time)
+        .group_by(date_expr_msg, Conversation.agent_id)
+        .order_by(date_expr_msg)
+    )
+    date_expr_conv = func.to_char(func.date_trunc("day", Conversation.updated_at), "YYYY-MM-DD")
+    conv_by_day = await db.execute(
+        select(
+            date_expr_conv.label("date"),
+            func.count(Conversation.id).label("count"),
+            Conversation.agent_id.label("category"),
+        )
+        .filter(Conversation.updated_at >= start_time)
+        .group_by(date_expr_conv, Conversation.agent_id)
+        .order_by(date_expr_conv)
+    )
+    return {
+        "query_start_time": str(start_time),
+        "conversations_14d": conv_count.scalar() or 0,
+        "assistant_messages_14d": msg_count.scalar() or 0,
+        "agents_by_message": [{"date": r.date, "count": r.count, "category": r.category} for r in msg_with_conv.all()],
+        "agents_by_conversation": [
+            {"date": r.date, "count": r.count, "category": r.category} for r in conv_by_day.all()
+        ],
+    }
+
+
 @dashboard.get("/stats/calls/timeseries", response_model=TimeSeriesStats)
 async def get_call_timeseries_stats(
     type: str = "models",  # models/agents/tokens/tools
@@ -773,8 +932,9 @@ async def get_call_timeseries_stats(
         # 根据类型查询数据
         if type == "models":
             # 模型调用统计（基于消息数量，按模型分组）
-            # 从message的extra_metadata中提取模型信息
-            category_expr = cast(Message.extra_metadata["response_metadata"]["model_name"], String)
+            # 从 message.extra_metadata.response_metadata.model_name 提取；缺失时显示为「未知模型」
+            raw_model = Message.extra_metadata["response_metadata"]["model_name"]
+            category_expr = func.coalesce(cast(raw_model, String), "unknown_model")
             query_result = await db.execute(
                 select(
                     group_format.label("date"),
@@ -788,22 +948,46 @@ async def get_call_timeseries_stats(
             )
             query = query_result.all()
         elif type == "agents":
-            # 智能体调用统计（基于对话更新时间，按智能体分组）
-            # 为对话创建独立的时间格式化器（使用 PostgreSQL 兼容的 to_char + INTERVAL）
-            conv_group_format = _get_time_group_format(Conversation.updated_at, time_range)
-
+            # 智能体调用统计：优先按 AI 消息数按天+agent 分组；若无消息数据则按会话数回退（API 调用至少会更新会话）
+            if time_range == "14days":
+                date_expr = func.to_char(func.date_trunc("day", Message.created_at), "YYYY-MM-DD")
+            else:
+                date_expr = _get_time_group_format(Message.created_at, time_range)
             query_result = await db.execute(
                 select(
-                    conv_group_format.label("date"),
-                    func.count(Conversation.id).label("count"),
+                    date_expr.label("date"),
+                    func.count(Message.id).label("count"),
                     Conversation.agent_id.label("category"),
                 )
-                .filter(Conversation.updated_at.isnot(None))
-                .filter(Conversation.updated_at >= query_start_time)
-                .group_by(conv_group_format, Conversation.agent_id)
-                .order_by(conv_group_format)
+                .select_from(Message)
+                .join(Conversation, Message.conversation_id == Conversation.id)
+                .filter(Message.role == "assistant")
+                .filter(Message.created_at >= query_start_time)
+                .group_by(date_expr, Conversation.agent_id)
+                .order_by(date_expr)
             )
-            query = query_result.all()
+            query = list(query_result.all())
+            # 若无 AI 消息数据，按会话维度回退：按会话 updated_at 所在天 + agent_id 统计
+            if not query and time_range == "14days":
+                conv_date_expr = func.to_char(func.date_trunc("day", Conversation.updated_at), "YYYY-MM-DD")
+                conv_result = await db.execute(
+                    select(
+                        conv_date_expr.label("date"),
+                        func.count(Conversation.id).label("count"),
+                        Conversation.agent_id.label("category"),
+                    )
+                    .filter(Conversation.updated_at >= query_start_time)
+                    .group_by(conv_date_expr, Conversation.agent_id)
+                    .order_by(conv_date_expr)
+                )
+                query = list(conv_result.all())
+                logger.info(
+                    f"dashboard/calls/timeseries agents: fallback by conversation, query_start_time={query_start_time!s}, rows={len(query)}"
+                )
+            else:
+                logger.info(
+                    f"dashboard/calls/timeseries agents: query_start_time={query_start_time!s}, rows={len(query)}"
+                )
         elif type == "tokens":
             # Token消耗统计（区分input/output tokens）
             # 先查询input tokens
@@ -876,14 +1060,41 @@ async def get_call_timeseries_stats(
         if type != "tokens":
             results = query
 
-        # 处理堆叠数据格式
-        # 首先收集所有类别
-        categories = set()
-        for result in results:
-            if hasattr(result, "category") and result.category:
-                categories.add(result.category)
+        # 规范化 category：None/空 统一为 unknown，避免前端拿到 key 不一致
+        def _normalize_category(raw: Any) -> str:
+            if raw is None or (isinstance(raw, str) and not raw.strip()):
+                if type == "models":
+                    return "unknown_model"
+                if type == "agents":
+                    return "unknown_agent"
+                if type == "tools":
+                    return "unknown_tool"
+                return "unknown"
+            return str(raw).strip()
 
-        # 如果没有类别数据，提供默认类别
+        # 收集所有类别并构建 time_data（使用规范化后的 category）
+        categories = set()
+        time_data = {}
+
+        def normalize_week_key(raw_key: str) -> str:
+            base_date = datetime.strptime(f"{raw_key}-1", "%Y-%W-%w")
+            iso_year, iso_week, _ = base_date.isocalendar()
+            return f"{iso_year}-{iso_week:02d}"
+
+        for result in results:
+            date_key = (result.date or "").strip()
+            if time_range == "14weeks":
+                date_key = normalize_week_key(date_key)
+            raw_cat = getattr(result, "category", None)
+            category = _normalize_category(raw_cat)
+            count = result.count
+
+            categories.add(category)
+            if date_key not in time_data:
+                time_data[date_key] = {}
+            time_data[date_key][category] = count
+
+        # 若没有任何数据，仍提供默认类别以便前端显示空图表
         if not categories:
             if type == "models":
                 categories.add("unknown_model")
@@ -896,30 +1107,10 @@ async def get_call_timeseries_stats(
 
         categories = sorted(list(categories))
 
-        # 重新组织数据：按时间点分组每个类别的数据
-        time_data = {}
-
-        def normalize_week_key(raw_key: str) -> str:
-            base_date = datetime.strptime(f"{raw_key}-1", "%Y-%W-%w")
-            iso_year, iso_week, _ = base_date.isocalendar()
-            return f"{iso_year}-{iso_week:02d}"
-
-        for result in results:
-            date_key = result.date
-            if time_range == "14weeks":
-                date_key = normalize_week_key(date_key)
-            category = getattr(result, "category", "unknown")
-            count = result.count
-
-            if date_key not in time_data:
-                time_data[date_key] = {}
-
-            time_data[date_key][category] = count
-
-        # 填充缺失的时间点（使用北京时间）
+        # 填充缺失的时间点：agents+14days 用 UTC 与查询一致，其余用北京时间
         data = []
-        # 从起始点开始（北京时间）
-        current_time = base_local_time
+        base_fill_time = start_time if (type == "agents" and time_range == "14days") else base_local_time
+        current_time = base_fill_time
 
         if time_range == "14hours":
             delta = timedelta(hours=1)
@@ -937,8 +1128,8 @@ async def get_call_timeseries_stats(
             else:
                 date_key = current_time.strftime("%Y-%m-%d")
 
-            # 获取该时间点的数据
-            day_data = time_data.get(date_key, {})
+            # 获取该时间点的数据（复制一份，避免修改 time_data）
+            day_data = dict(time_data.get(date_key, {}))
             day_total = sum(day_data.values())
 
             # 确保所有类别都有值（缺失的补0）

@@ -23,6 +23,7 @@ PUBLIC_PATHS = [
     r"^/api/system/info$",  # 获取系统信息配置
     r"^/api/course/books",  # 课本伴读（列表、页数、页面图、OCR）
     r"^/api/course/videos",  # 视频伴读
+    r"^/api/dashboard/stats/calls/debug$",  # 调用统计调试（仅聚合数据，无敏感信息）
 ]
 
 

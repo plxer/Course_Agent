@@ -13,9 +13,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src import config as conf
 from src.agents import agent_manager
+from sqlalchemy import func, select, update
+
+from src.agents.common import load_chat_model
 from src.services.chat_stream_service import stream_agent_chat
-from src.storage.postgres.models_business import User
+from src.services.exercise_service import grade_answer, generate_question
+from src.storage.postgres.models_business import (
+    BookReadingPosition,
+    ExerciseAttempt,
+    MallItem,
+    User,
+    UserMallItem,
+)
 from src.utils import logger
+from src.utils.datetime_utils import format_utc_datetime, utc_now_naive
 from server.utils.auth_middleware import get_db, get_required_user
 
 course = APIRouter(prefix="/course", tags=["course"])
@@ -63,6 +74,46 @@ class CourseChatRequest(BaseModel):
     query: str
     thread_id: Optional[str] = None
     meta: dict = {}
+    enable_web_search: Optional[bool] = None  # 本次对话是否启用网络搜索，不传则用智能体/部门配置
+
+
+class ConversationTitleRequest(BaseModel):
+    """根据首轮一问一答生成对话标题"""
+    first_question: str
+    first_answer: str
+
+
+@course.post("/chat/title")
+async def generate_conversation_title(
+    body: ConversationTitleRequest,
+    current_user: User = Depends(get_required_user),
+):
+    """根据用户第一个问题和智能体第一个回答，用模型生成一句简短的对话标题。"""
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    prompt = """根据下面用户的第一条问题和助手的第一次回复，生成一句简短的对话标题（不超过20字，不要引号、不要markdown、不要“标题：”等前缀）。只输出标题内容。"""
+    user_content = f"用户问题：{body.first_question[:500]}\n助手回复：{body.first_answer[:500]}"
+    model = load_chat_model(conf.fast_model)
+    try:
+        msg_list = [
+            SystemMessage(content=prompt),
+            HumanMessage(content=user_content),
+        ]
+        resp = await model.ainvoke(msg_list)
+        title = (resp.content if hasattr(resp, "content") else str(resp)).strip()
+        # 去掉可能的引号、前缀
+        for prefix in ("标题：", "标题:", "标题 "):
+            if title.lower().startswith(prefix.lower()):
+                title = title[len(prefix) :].strip()
+        if len(title) > 24:
+            title = title[:21] + "…"
+        if not title:
+            title = body.first_question[:20] + "…" if len(body.first_question) > 20 else body.first_question
+        return {"title": title}
+    except Exception as e:
+        logger.warning("generate_conversation_title failed: %s", e)
+        fallback = body.first_question.strip()
+        return {"title": fallback[:20] + "…" if len(fallback) > 20 else fallback}
 
 
 @course.post("/chat/stream")
@@ -86,6 +137,8 @@ async def course_chat_stream(
 
     thread_id = request.thread_id or str(uuid.uuid4())
     config = {"thread_id": thread_id}
+    if request.enable_web_search is not None:
+        config["enable_web_search"] = request.enable_web_search
     meta = request.meta or {}
     if "request_id" not in meta or not meta.get("request_id"):
         meta["request_id"] = str(uuid.uuid4())
@@ -252,3 +305,311 @@ def ocr_text_selection(body: OcrRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OCR 失败: {e!s}") from e
+
+
+# --- 课本伴读阅读进度（永久记录，需登录）---
+
+
+class ReadingPositionBody(BaseModel):
+    book_id: str
+    page: int
+
+
+@course.get("/reading-position")
+async def get_reading_position(
+    book_id: str,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取当前用户对某本书的阅读进度。"""
+    from sqlalchemy import select
+
+    result = await db.execute(
+        select(BookReadingPosition).where(
+            BookReadingPosition.user_id == current_user.id,
+            BookReadingPosition.book_id == book_id,
+        )
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        return {"page": None}
+    return {"page": row.page}
+
+
+@course.put("/reading-position")
+async def save_reading_position(
+    body: ReadingPositionBody,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """保存当前用户对某本书的阅读进度（永久记录）。"""
+    from sqlalchemy import select
+
+    from src.utils.datetime_utils import utc_now_naive
+
+    if body.page < 1:
+        raise HTTPException(status_code=400, detail="页码从 1 开始")
+    result = await db.execute(
+        select(BookReadingPosition).where(
+            BookReadingPosition.user_id == current_user.id,
+            BookReadingPosition.book_id == body.book_id,
+        )
+    )
+    row = result.scalar_one_or_none()
+    if row:
+        row.page = body.page
+        row.updated_at = utc_now_naive()
+    else:
+        db.add(
+            BookReadingPosition(
+                user_id=current_user.id,
+                book_id=body.book_id,
+                page=body.page,
+            )
+        )
+    return {"success": True, "page": body.page}
+
+
+# --- 习题推荐：出题、作答、错题统计、积分与商城 ---
+
+
+class ExerciseGenerateRequest(BaseModel):
+    question_type: str  # choice / fill / short_answer
+    knowledge_point: str
+
+
+@course.post("/exercises/generate")
+async def exercises_generate(
+    body: ExerciseGenerateRequest,
+    current_user: User = Depends(get_required_user),
+):
+    """根据题型和知识点生成一道题（不落库，提交答案时再记录）。"""
+    try:
+        out = await generate_question(body.question_type, body.knowledge_point)
+        return out
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class ExerciseSubmitRequest(BaseModel):
+    question_type: str
+    knowledge_point: str
+    question_content: str
+    correct_answer: str
+    scoring_points: list = []
+    user_answer: str
+
+
+@course.post("/exercises/submit")
+async def exercises_submit(
+    body: ExerciseSubmitRequest,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """提交答案：批改、记录对错(0/1)、答对加 1 积分。"""
+    try:
+        result = await grade_answer(
+            question_type=body.question_type,
+            question_content=body.question_content,
+            correct_answer=body.correct_answer,
+            scoring_points=body.scoring_points or [],
+            user_answer=body.user_answer.strip(),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    is_correct = result["is_correct"]
+    explanation = result.get("explanation") or ""
+
+    attempt = ExerciseAttempt(
+        user_id=current_user.id,
+        question_type=body.question_type,
+        knowledge_point=body.knowledge_point,
+        question_content=body.question_content,
+        correct_answer=body.correct_answer,
+        scoring_points=body.scoring_points or [],
+        user_answer=body.user_answer,
+        is_correct=is_correct,
+        explanation=explanation,
+    )
+    db.add(attempt)
+
+    if is_correct:
+        user_row = await db.get(User, current_user.id)
+        if user_row:
+            user_row.points = (user_row.points or 0) + 1
+            user_row.last_login = utc_now_naive()
+
+    await db.commit()
+    await db.refresh(attempt)
+    return {
+        "is_correct": is_correct,
+        "explanation": explanation,
+        "attempt_id": attempt.id,
+    }
+
+
+@course.get("/exercises/wrong-stats")
+async def exercises_wrong_stats(
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """按知识点统计答错次数，用于环状图。"""
+    q = (
+        select(ExerciseAttempt.knowledge_point, func.count(ExerciseAttempt.id).label("count"))
+        .where(
+            ExerciseAttempt.user_id == current_user.id,
+            ExerciseAttempt.is_correct == 0,
+        )
+        .group_by(ExerciseAttempt.knowledge_point)
+    )
+    result = await db.execute(q)
+    rows = result.all()
+    by_knowledge_point = [{"name": r[0], "count": r[1]} for r in rows]
+    return {"by_knowledge_point": by_knowledge_point}
+
+
+@course.get("/exercises/wrong-list")
+async def exercises_wrong_list(
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+    page: int = 1,
+    page_size: int = 20,
+):
+    """分页获取当前用户的错题列表。"""
+    offset = (page - 1) * page_size
+    total = await db.execute(
+        select(func.count()).select_from(ExerciseAttempt).where(
+            ExerciseAttempt.user_id == current_user.id,
+            ExerciseAttempt.is_correct == 0,
+        )
+    )
+    total_count = total.scalar() or 0
+    q = (
+        select(ExerciseAttempt)
+        .where(
+            ExerciseAttempt.user_id == current_user.id,
+            ExerciseAttempt.is_correct == 0,
+        )
+        .order_by(ExerciseAttempt.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
+    result = await db.execute(q)
+    attempts = result.scalars().all()
+    items = [a.to_dict() for a in attempts]
+    return {"items": items, "total": total_count, "page": page, "page_size": page_size}
+
+
+@course.get("/points")
+async def get_points(
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """当前用户积分。"""
+    user_row = await db.get(User, current_user.id)
+    points = user_row.points if user_row else 0
+    return {"points": points}
+
+
+MALL_COST_MIN, MALL_COST_MAX = 1, 100
+
+_DEFAULT_MALL_ITEMS = [
+    ("初出茅庐", "积分达到 10 即可兑换", 10, "🌱", 1),
+    ("小试牛刀", "积分达到 30 即可兑换", 30, "⚔️", 2),
+    ("勤学不辍", "积分达到 50 即可兑换", 50, "📚", 3),
+    ("网络达人", "积分达到 80 即可兑换", 80, "🏆", 4),
+    ("学神附体", "积分达到 100 即可兑换", 100, "✨", 5),
+]
+
+
+async def _ensure_mall_items(db: AsyncSession):
+    """确保商城有默认称号（可重复调用）。兑换规则：单价 1～100 积分，兑换时不扣积分。"""
+    r = await db.execute(select(func.count()).select_from(MallItem))
+    if (r.scalar() or 0) == 0:
+        for name, desc, cost, icon, order in _DEFAULT_MALL_ITEMS:
+            db.add(MallItem(name=name, description=desc, cost=cost, icon=icon, sort_order=order))
+    # 已有数据也做一次迁移：把 cost 限制在 1～100，并把默认 5 个称号的文案与 cost 同步
+    await db.execute(
+        update(MallItem).values(
+            cost=func.least(func.greatest(MallItem.cost, MALL_COST_MIN), MALL_COST_MAX)
+        )
+    )
+    for name, desc, cost, icon, order in _DEFAULT_MALL_ITEMS:
+        await db.execute(
+            update(MallItem).where(MallItem.name == name).values(description=desc, cost=cost)
+        )
+
+
+@course.get("/mall")
+async def mall_list(
+    db: AsyncSession = Depends(get_db),
+):
+    """商城称号列表（所有人可看）。"""
+    await _ensure_mall_items(db)
+    await db.commit()
+    result = await db.execute(select(MallItem).order_by(MallItem.sort_order))
+    items = result.scalars().all()
+    return {"items": [x.to_dict() for x in items]}
+
+
+class MallPurchaseRequest(BaseModel):
+    item_id: int
+
+
+@course.post("/mall/purchase")
+async def mall_purchase(
+    body: MallPurchaseRequest,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """用积分兑换称号。规则：商品单价 1～100 积分，兑换时不扣积分（仅校验积分达标即可兑换）。"""
+    await _ensure_mall_items(db)
+    await db.commit()
+    item = await db.get(MallItem, body.item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="商品不存在")
+    if not (MALL_COST_MIN <= item.cost <= MALL_COST_MAX):
+        raise HTTPException(
+            status_code=400,
+            detail=f"商品积分不在有效范围（{MALL_COST_MIN}～{MALL_COST_MAX}）",
+        )
+    user_row = await db.get(User, current_user.id)
+    points = user_row.points if user_row else 0
+    if points < item.cost:
+        raise HTTPException(status_code=400, detail="积分不足")
+    existing = await db.execute(
+        select(UserMallItem).where(
+            UserMallItem.user_id == current_user.id,
+            UserMallItem.mall_item_id == body.item_id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="已兑换过该称号")
+    db.add(UserMallItem(user_id=current_user.id, mall_item_id=body.item_id))
+    await db.commit()
+    return {"success": True, "points_remaining": points}
+
+
+@course.get("/mall/my-titles")
+async def mall_my_titles(
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """当前用户已兑换的称号列表。"""
+    q = (
+        select(MallItem, UserMallItem.acquired_at)
+        .join(UserMallItem, UserMallItem.mall_item_id == MallItem.id)
+        .where(UserMallItem.user_id == current_user.id)
+        .order_by(UserMallItem.acquired_at.desc())
+    )
+    result = await db.execute(q)
+    rows = result.all()
+    out = []
+    for row in rows:
+        mall_item, acquired_at = row[0], row[1]
+        out.append({
+            "item": mall_item.to_dict(),
+            "acquired_at": format_utc_datetime(acquired_at) if acquired_at else None,
+        })
+    return {"items": out}

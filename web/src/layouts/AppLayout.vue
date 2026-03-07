@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted, computed, provide } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { GithubOutlined } from '@ant-design/icons-vue'
-import { Bot, Waypoints, LibraryBig, BarChart3, CircleCheck } from 'lucide-vue-next'
+import { Bot, Waypoints, LibraryBig, CircleCheck } from 'lucide-vue-next'
 
 import { useConfigStore } from '@/stores/config'
 import { useDatabaseStore } from '@/stores/database'
@@ -85,32 +85,11 @@ console.log(route)
 
 const activeTaskCount = computed(() => activeCountRef.value || 0)
 
-// 下面是导航菜单部分，添加智能体项
+// 导航菜单（无左侧运维入口，运维在课程顶栏）
 const mainList = [
-  {
-    name: '智能体',
-    path: '/agent',
-    icon: Bot,
-    activeIcon: Bot
-  },
-  {
-    name: '图谱',
-    path: '/graph',
-    icon: Waypoints,
-    activeIcon: Waypoints
-  },
-  {
-    name: '知识库',
-    path: '/database',
-    icon: LibraryBig,
-    activeIcon: LibraryBig
-  },
-  {
-    name: 'Dashboard',
-    path: '/dashboard',
-    icon: BarChart3,
-    activeIcon: BarChart3
-  }
+  { name: '智能体', path: '/agent', icon: Bot, activeIcon: Bot },
+  { name: '图谱', path: '/graph', icon: Waypoints, activeIcon: Waypoints },
+  { name: '知识库', path: '/database', icon: LibraryBig, activeIcon: LibraryBig }
 ]
 
 // Provide settings modal methods to child components
@@ -133,7 +112,6 @@ provide('settingsModal', {
           v-for="(item, index) in mainList"
           :key="index"
           :to="item.path"
-          v-show="!item.hidden"
           class="nav-item"
           active-class="active"
         >

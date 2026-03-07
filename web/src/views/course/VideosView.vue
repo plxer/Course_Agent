@@ -11,7 +11,16 @@
             <router-link to="/conversation" class="videos-nav-link" :class="{ active: $route.path === '/conversation' || $route.path === '/course' }">对话</router-link>
             <router-link to="/exercises" class="videos-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
             <router-link to="/reading" class="videos-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
-            <router-link to="/videos" class="videos-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
+            <router-link
+              to="/videos"
+              class="videos-nav-link"
+              :class="{ active: $route.path === '/videos' }"
+              @click.prevent="handleVideosNavClick"
+            >
+              视频
+            </router-link>
+            <router-link to="/mall" class="videos-nav-link" :class="{ active: $route.path === '/mall' }">积分商城</router-link>
+            <router-link v-if="userStore.isAdmin" to="/ops" class="videos-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
           </div>
           <div class="videos-auth">
             <template v-if="!userStore.isLoggedIn">
@@ -120,12 +129,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, onMounted, computed, watch } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
 import { listVideos, getVideoUrl } from '@/apis/courseApi.js';
 import { useUserStore } from '@/stores/user';
 
 const router = useRouter();
+const route = useRoute();
 const userStore = useUserStore();
 const handleLogout = () => { userStore.logout(); router.push('/course'); };
 const handleSwitchAccount = () => { userStore.logout(); router.push('/login'); };
@@ -167,12 +177,55 @@ const loadVideos = async () => {
 // 播放视频
 const playVideo = (video) => {
   currentVideo.value = video;
+  syncVideoToQuery();
 };
 
-// 关闭视频
-const closeVideo = () => {
+// 关闭视频，回到列表
+function closeVideo() {
   currentVideo.value = null;
-};
+  if (route.query.video) {
+    router.replace({ path: '/videos', query: {} });
+  }
+}
+
+// 同步当前播放视频到 URL，便于刷新恢复；进入播放时 push 以支持浏览器后退回列表
+function syncVideoToQuery() {
+  const video = currentVideo.value;
+  if (!video) {
+    if (route.query.video) {
+      router.replace({ path: '/videos', query: {} });
+    }
+    return;
+  }
+  const next = { path: '/videos', query: { video: String(video.id) } };
+  if (route.query.video !== next.query.video) {
+    const isEnteringPlayer = !route.query.video;
+    if (isEnteringPlayer) {
+      router.push(next);
+    } else {
+      router.replace(next);
+    }
+  }
+}
+
+// 点击顶部「视频」：若已在播放页则回列表，否则跳转到视频
+function handleVideosNavClick() {
+  if (route.path === '/videos' && currentVideo.value) {
+    closeVideo();
+  } else {
+    router.push('/videos');
+  }
+}
+
+// 浏览器后退时：若回到 /videos 且无 video 参数，则关闭播放器显示列表
+watch(
+  () => ({ path: route.path, video: route.query.video }),
+  ({ path, video }) => {
+    if (path === '/videos' && !video && currentVideo.value) {
+      currentVideo.value = null;
+    }
+  }
+);
 
 // 格式化文件大小
 const formatFileSize = (bytes) => {
@@ -181,8 +234,16 @@ const formatFileSize = (bytes) => {
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
 };
 
-onMounted(() => {
-  loadVideos();
+onMounted(async () => {
+  await loadVideos();
+  const videoId = route.query.video;
+  if (videoId && chapters.value.length > 0) {
+    const allVideos = chapters.value.flatMap((ch) => ch.videos);
+    const video = allVideos.find((v) => String(v.id) === String(videoId));
+    if (video) {
+      currentVideo.value = video;
+    }
+  }
   // 确保Font Awesome已加载
   if (!document.querySelector('link[href*="font-awesome"]')) {
     const link = document.createElement('link');

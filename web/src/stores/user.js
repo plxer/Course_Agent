@@ -13,6 +13,8 @@ export const useUserStore = defineStore('user', () => {
   const userRole = ref('')
   const departmentId = ref(null)
   const departmentName = ref('')
+  /** 课程积分（null 表示未加载，用于避免习题/商城页先显示 0 再闪成正确值） */
+  const userPoints = ref(null)
 
   // 计算属性
   const isLoggedIn = computed(() => !!token.value)
@@ -80,6 +82,7 @@ export const useUserStore = defineStore('user', () => {
     userRole.value = ''
     departmentId.value = null
     departmentName.value = ''
+    userPoints.value = null
 
     // 清除 agentStore 状态，确保重新登录时能正确加载数据
     const agentStore = useAgentStore()
@@ -388,6 +391,10 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
+  function setUserPoints(p) {
+    userPoints.value = p
+  }
+
   return {
     // 状态
     token,
@@ -399,6 +406,7 @@ export const useUserStore = defineStore('user', () => {
     userRole,
     departmentId,
     departmentName,
+    userPoints,
 
     // 计算属性
     isLoggedIn,
@@ -419,7 +427,8 @@ export const useUserStore = defineStore('user', () => {
     validateUsernameAndGenerateUserId,
     uploadAvatar,
     getCurrentUser,
-    updateProfile
+    updateProfile,
+    setUserPoints
   }
 })
 

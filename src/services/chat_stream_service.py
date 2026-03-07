@@ -88,7 +88,42 @@ async def _get_existing_message_ids(conv_repo: ConversationRepository, thread_id
     }
 
 
-async def _save_ai_message(conv_repo: ConversationRepository, thread_id: str, msg_dict: dict) -> None:
+def _normalize_tool_call(tc: dict) -> dict:
+    """兼容 LangChain 多种 tool_call 格式：顶层 name/args/id 或 function.name/function.arguments，id 可能在 tool_call_id。"""
+    if not tc:
+        return {}
+    name = tc.get("name")
+    args = tc.get("args")
+    tc_id = tc.get("id") or tc.get("tool_call_id")
+    if name is None and isinstance(tc.get("function"), dict):
+        fn = tc["function"]
+        name = fn.get("name", "unknown")
+        args = args or fn.get("arguments")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args) if args.strip() else {}
+            except Exception:
+                args = {}
+    return {"name": name or "unknown", "args": args if isinstance(args, dict) else (args or {}), "id": tc_id}
+
+
+def _ensure_response_metadata_model(msg_dict: dict, model_name: str | None) -> None:
+    """若消息无 response_metadata.model_name，则用当前请求的 model 填充，便于调用统计按模型分组。"""
+    if not model_name:
+        return
+    existing = (msg_dict.get("response_metadata") or {}).get("model_name")
+    if existing and str(existing).strip():
+        return
+    msg_dict.setdefault("response_metadata", {})["model_name"] = model_name
+
+
+async def _save_ai_message(
+    conv_repo: ConversationRepository,
+    thread_id: str,
+    msg_dict: dict,
+    model_name: str | None = None,
+) -> None:
+    _ensure_response_metadata_model(msg_dict, model_name)
     content = msg_dict.get("content", "")
     tool_calls_data = msg_dict.get("tool_calls", [])
 
@@ -102,12 +137,15 @@ async def _save_ai_message(conv_repo: ConversationRepository, thread_id: str, ms
 
     if ai_msg and tool_calls_data:
         for tc in tool_calls_data:
+            if not isinstance(tc, dict):
+                continue
+            norm = _normalize_tool_call(tc)
             await conv_repo.add_tool_call(
                 message_id=ai_msg.id,
-                tool_name=tc.get("name", "unknown"),
-                tool_input=tc.get("args", {}),
+                tool_name=norm.get("name", "unknown"),
+                tool_input=norm.get("args") or {},
                 status="pending",
-                langgraph_tool_call_id=tc.get("id"),
+                langgraph_tool_call_id=norm.get("id"),
             )
 
 
@@ -169,6 +207,7 @@ async def save_messages_from_langgraph_state(
     thread_id: str,
     conv_repo: ConversationRepository,
     config_dict: dict,
+    model_name: str | None = None,
 ) -> None:
     try:
         messages = await _get_langgraph_messages(agent_instance, config_dict)
@@ -179,13 +218,16 @@ async def save_messages_from_langgraph_state(
 
         for msg in messages:
             msg_dict = msg.model_dump() if hasattr(msg, "model_dump") else {}
-            msg_type = msg_dict.get("type", "unknown")
+            # LangChain 可能返回 type="ai" 或 type="AIMessage"
+            msg_type = (msg_dict.get("type") or "").lower()
+            if msg_type == "aimessage":
+                msg_type = "ai"
 
             if msg_type == "human" or getattr(msg, "id", None) in existing_ids:
                 continue
 
             if msg_type == "ai":
-                await _save_ai_message(conv_repo, thread_id, msg_dict)
+                await _save_ai_message(conv_repo, thread_id, msg_dict, model_name=model_name)
             elif msg_type == "tool":
                 await _save_tool_message(conv_repo, msg_dict)
 
@@ -333,6 +375,9 @@ async def stream_agent_chat(
         logger.warning(f"No thread_id provided, generated new thread_id: {thread_id}")
 
     agent_config = (config_item.config_json or {}).get("context", {})
+    # 请求级覆盖：用户可选择本次对话是否启用网络搜索
+    if config.get("enable_web_search") is not None:
+        agent_config = {**agent_config, "enable_web_search": bool(config["enable_web_search"])}
     input_context = {
         "user_id": user_id,
         "thread_id": thread_id,
@@ -408,10 +453,54 @@ async def stream_agent_chat(
                     yield make_chunk(status="interrupted", message="检测到敏感内容，已中断输出", meta=meta)
                     return
 
-                yield make_chunk(content=msg.content, msg=msg.model_dump(), metadata=metadata, status="loading")
+                chunk_dict = msg.model_dump()
+                yield make_chunk(content=msg.content, msg=chunk_dict, metadata=metadata, status="loading")
+                # 流式 chunk 也可能带 tool_calls（如第二次搜索），显式下发便于前端显示「搜索中」
+                tool_calls = chunk_dict.get("tool_calls") or []
+                for tc in tool_calls:
+                    name = (tc.get("name") or (tc.get("function") or {}).get("name") or "").lower()
+                    if "tavily" in name:
+                        args = tc.get("args") or (tc.get("function") or {}).get("arguments")
+                        query = ""
+                        if isinstance(args, dict):
+                            query = args.get("query") or args.get("q") or ""
+                        elif isinstance(args, str):
+                            try:
+                                p = json.loads(args)
+                                query = p.get("query") or p.get("q") or ""
+                            except Exception:
+                                pass
+                        yield make_chunk(
+                            status="loading",
+                            tool_calling={"name": "tavily_search", "query": query},
+                            metadata=metadata,
+                        )
+                        break
             else:
                 msg_dict = msg.model_dump()
                 yield make_chunk(msg=msg_dict, metadata=metadata, status="loading")
+
+                # 显式下发「正在搜索」事件，便于前端稳定显示（不依赖 msg.type 命名）
+                tool_calls = msg_dict.get("tool_calls") or []
+                for tc in tool_calls:
+                    name = (tc.get("name") or (tc.get("function") or {}).get("name") or "").lower()
+                    if "tavily" in name:
+                        args = tc.get("args") or (tc.get("function") or {}).get("arguments")
+                        query = ""
+                        if isinstance(args, dict):
+                            query = args.get("query") or args.get("q") or ""
+                        elif isinstance(args, str):
+                            try:
+                                p = json.loads(args)
+                                query = p.get("query") or p.get("q") or ""
+                            except Exception:
+                                pass
+                        yield make_chunk(
+                            status="loading",
+                            tool_calling={"name": "tavily_search", "query": query},
+                            metadata=metadata,
+                        )
+                        break
 
                 try:
                     if msg_dict.get("type") == "tool":
@@ -448,11 +537,13 @@ async def stream_agent_chat(
 
         yield make_chunk(status="finished", meta=meta)
 
+        model_name = input_context.get("agent_config") and input_context["agent_config"].get("model")
         await save_messages_from_langgraph_state(
             agent_instance=agent,
             thread_id=thread_id,
             conv_repo=conv_repo,
             config_dict=langgraph_config,
+            model_name=model_name or None,
         )
 
     except (asyncio.CancelledError, ConnectionError) as e:
@@ -605,11 +696,13 @@ async def stream_agent_resume(
         yield make_resume_chunk(status="finished", meta=meta)
 
         conv_repo = ConversationRepository(db)
+        model_name = input_context.get("agent_config") and input_context["agent_config"].get("model")
         await save_messages_from_langgraph_state(
             agent_instance=agent,
             thread_id=thread_id,
             conv_repo=conv_repo,
             config_dict=langgraph_config,
+            model_name=model_name or None,
         )
 
     except (asyncio.CancelledError, ConnectionError) as e:

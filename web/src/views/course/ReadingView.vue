@@ -10,8 +10,17 @@
           <div class="reading-nav">
             <router-link to="/conversation" class="reading-nav-link" :class="{ active: $route.path === '/conversation' || $route.path === '/course' }">对话</router-link>
             <router-link to="/exercises" class="reading-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
-            <router-link to="/reading" class="reading-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
+            <router-link
+              to="/reading"
+              class="reading-nav-link"
+              :class="{ active: $route.path === '/reading' }"
+              @click.prevent="handleReadingNavClick"
+            >
+              课本伴读
+            </router-link>
             <router-link to="/videos" class="reading-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
+            <router-link to="/mall" class="reading-nav-link" :class="{ active: $route.path === '/mall' }">积分商城</router-link>
+            <router-link v-if="userStore.isAdmin" to="/ops" class="reading-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
           </div>
           <div class="reading-auth">
             <template v-if="!userStore.isLoggedIn">
@@ -72,7 +81,7 @@
     <!-- PDF 阅读器 -->
     <main class="reading-reader" v-else>
       <div class="reading-reader-header">
-        <button class="reading-back-btn" @click="selectedBook = null">
+        <button class="reading-back-btn" @click="selectedBook = null; syncReaderToQuery()">
           <ArrowLeftOutlined /> 返回
         </button>
         <h2 class="reading-reader-title">{{ selectedBook.name }}</h2>
@@ -218,7 +227,12 @@
                 <svg class="reading-avatar-robot" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h2v1h2v2h2v2h1c.55 0 1 .45 1 1v2h1v2h-1v2H4v-2H3v-2h1v-2c0-.55.45-1 1-1h1v-2h2V8h2V7h2V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M8 18h8v-2H8v2m-1-5h2v2H7v-2m8 0v2h-2v-2h2m-3-3h2v2h-2v-2m-4 0v2H7v-2h2z"/></svg>
               </div>
               <div class="reading-chat-content" :class="msg.role">
-                <div class="reading-chat-text">{{ msg.content }}</div>
+                <div v-if="msg.role === 'user'" class="reading-chat-text">{{ msg.content }}</div>
+                <div
+                  v-else-if="msg.role === 'ai' && msg.content"
+                  class="reading-chat-text reading-chat-markdown"
+                  v-html="renderMarkdown(msg.content)"
+                />
               </div>
               <div v-if="msg.role === 'user'" class="reading-chat-avatar user">
                 <span>我</span>
@@ -231,7 +245,12 @@
                 <svg class="reading-avatar-robot" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h2v1h2v2h2v2h1c.55 0 1 .45 1 1v2h1v2h-1v2H4v-2H3v-2h1v-2c0-.55.45-1 1-1h1v-2h2V8h2V7h2V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M8 18h8v-2H8v2m-1-5h2v2H7v-2m8 0v2h-2v-2h2m-3-3h2v2h-2v-2m-4 0v2H7v-2h2z"/></svg>
               </div>
               <div class="reading-chat-content ai loading">
-                <div v-if="currentChatMessage" class="reading-chat-text">{{ currentChatMessage }}</div>
+                <div
+                  v-if="currentChatMessage"
+                  :key="`reading-loading-${currentChatMessage.length}`"
+                  class="reading-chat-text reading-chat-markdown"
+                  v-html="renderMarkdown(currentChatMessage)"
+                />
                 <div v-else class="reading-chat-typing">
                   <span></span>
                   <span></span>
@@ -278,16 +297,23 @@
 
 <script setup>
 import { ref, onMounted, computed, nextTick, h, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
+import { marked } from 'marked';
 import { LeftOutlined, RightOutlined, ArrowLeftOutlined, CommentOutlined, CloseOutlined, DeleteOutlined } from '@ant-design/icons-vue';
-import { listBooks, getBookPages, getBookPageUrl, ocrTextSelection, courseChatStream } from '@/apis/courseApi.js';
+import { listBooks, getBookPages, getBookPageUrl, ocrTextSelection, courseChatStream, getReadingPosition as getReadingPositionApi, saveReadingPosition as saveReadingPositionApi } from '@/apis/courseApi.js';
 import { useUserStore } from '@/stores/user';
 import { agentApi, threadApi } from '@/apis/agent_api.js';
 
 const router = useRouter();
+const route = useRoute();
 const userStore = useUserStore();
 const handleLogout = () => { userStore.logout(); router.push('/course'); };
 const handleSwitchAccount = () => { userStore.logout(); router.push('/login'); };
+
+function renderMarkdown(text) {
+  if (!text || typeof text !== 'string') return '';
+  return marked.parse(text, { gfm: true, breaks: true });
+}
 
 const books = ref([]);
 const selectedBook = ref(null);
@@ -409,40 +435,34 @@ const selectionStyle = computed(() => {
 // 计算选择框工具栏的位置（显示在选择区域旁边）
 const selectionBarStyle = computed(() => {
   if (!selectedText.value) return {};
-  
-  // 使用保存的最终选择位置或当前选择位置
+  let containerWidth = 800;
+  let containerHeight = 600;
+  if (pageImage.value) {
+    try {
+      const rect = pageImage.value.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        containerWidth = rect.width;
+        containerHeight = rect.height;
+      }
+    } catch (_) {
+      /* 刷新或未挂载时可能取不到尺寸，用默认值 */
+    }
+  }
   const left = finalSelectionPosition.value.left || Math.min(selection.value.startX, selection.value.endX);
   const top = finalSelectionPosition.value.top || Math.min(selection.value.startY, selection.value.endY);
   const width = finalSelectionPosition.value.width || Math.abs(selection.value.endX - selection.value.startX);
   const height = finalSelectionPosition.value.height || Math.abs(selection.value.endY - selection.value.startY);
-  
-  // 在选择区域右侧显示，如果右侧空间不够则在左侧显示
-  const barWidth = 300; // 选择框的预估宽度
-  const containerWidth = pageImage.value ? pageImage.value.getBoundingClientRect().width : 800;
+  const barWidth = 300;
   const rightSpace = containerWidth - (left + width);
-  
-  let barLeft = left + width + 10; // 默认显示在右侧
+  let barLeft = left + width + 10;
   let barTop = top;
-  
-  // 如果右侧空间不够，显示在左侧
   if (rightSpace < barWidth) {
     barLeft = left - barWidth - 10;
   }
-  
-  // 确保不超出容器边界
-  if (barLeft < 0) {
-    barLeft = 10;
-  }
-  if (barLeft + barWidth > containerWidth) {
-    barLeft = containerWidth - barWidth - 10;
-  }
-  
-  // 如果选择区域在底部，工具栏显示在上方
-  const containerHeight = pageImage.value ? pageImage.value.getBoundingClientRect().height : 600;
+  barLeft = Math.max(10, Math.min(barLeft, containerWidth - barWidth - 10));
   if (top + height > containerHeight - 150) {
-    barTop = Math.max(10, top - 120); // 工具栏高度约120px
+    barTop = Math.max(10, top - 120);
   }
-  
   return {
     left: `${barLeft}px`,
     top: `${barTop}px`,
@@ -468,6 +488,81 @@ const loadBooks = async () => {
   }
 };
 
+const READING_POSITION_KEY = 'yuxi_reading_position';
+
+function getReadingPositionKey(bookId) {
+  const uid = userStore.userId || userStore.userIdLogin || 'guest';
+  return `${READING_POSITION_KEY}_${uid}_${bookId}`;
+}
+
+function saveReadingPosition(bookId, page) {
+  if (!bookId || page < 1) return;
+  try {
+    localStorage.setItem(getReadingPositionKey(bookId), JSON.stringify({ page }));
+  } catch (_) {}
+}
+
+function loadReadingPosition(bookId) {
+  if (!bookId) return null;
+  try {
+    const raw = localStorage.getItem(getReadingPositionKey(bookId));
+    const data = raw ? JSON.parse(raw) : null;
+    return data && typeof data.page === 'number' && data.page >= 1 ? data.page : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// 同步当前书/页到 URL，便于刷新后恢复；进入阅读时 push 以支持浏览器后退回列表
+function syncReaderToQuery() {
+  const book = selectedBook.value;
+  const page = currentPage.value;
+  if (!book) {
+    if (route.query.book || route.query.page) {
+      router.replace({ path: '/reading', query: {} });
+    }
+    return;
+  }
+  const next = { path: '/reading', query: { book: book.id, page: String(page) } };
+  if (route.query.book !== next.query.book || route.query.page !== next.query.page) {
+    const isEnteringReader = !route.query.book;
+    if (isEnteringReader) {
+      router.push(next);
+    } else {
+      router.replace(next);
+    }
+  }
+}
+
+// 返回课本列表（供导航“课本伴读”点击与浏览器后退后同步状态）
+function goToList() {
+  selectedBook.value = null;
+  selectedText.value = '';
+  finalSelectionPosition.value = { left: 0, top: 0, width: 0, height: 0 };
+  if (route.query.book || route.query.page) {
+    router.replace({ path: '/reading', query: {} });
+  }
+}
+
+// 点击顶部“课本伴读”：若已在阅读页则回列表，否则跳转到课本伴读
+function handleReadingNavClick() {
+  if (route.path === '/reading' && selectedBook.value) {
+    goToList();
+  } else {
+    router.push('/reading');
+  }
+}
+
+// 浏览器后退时：若回到 /reading 且无 book 参数，则显示课本列表
+watch(
+  () => ({ path: route.path, book: route.query.book }),
+  ({ path, book }) => {
+    if (path === '/reading' && !book && selectedBook.value) {
+      goToList();
+    }
+  }
+);
+
 // 选择课本
 const selectBook = async (book) => {
   selectedBook.value = book;
@@ -483,7 +578,23 @@ const selectBook = async (book) => {
   try {
     const response = await getBookPages(book.id);
     totalPages.value = response.page_count || 0;
-    await loadPage(1);
+    let startPage = 1;
+    if (totalPages.value > 0) {
+      if (userStore.isLoggedIn) {
+        try {
+          const pos = await getReadingPositionApi(book.id);
+          if (pos != null && pos.page != null && pos.page >= 1 && pos.page <= totalPages.value) {
+            startPage = pos.page;
+          }
+        } catch (_) {}
+      }
+      if (startPage === 1) {
+        const saved = loadReadingPosition(book.id);
+        if (saved != null && saved >= 1 && saved <= totalPages.value) startPage = saved;
+      }
+    }
+    await loadPage(startPage);
+    syncReaderToQuery();
   } catch (error) {
     console.error('加载课本信息失败:', error);
   }
@@ -506,6 +617,13 @@ const loadPage = async (pageNum) => {
   
   console.log('加载页面:', pageNum, '总页数:', totalPages.value);
   currentPage.value = pageNum;
+  saveReadingPosition(selectedBook.value.id, pageNum);
+  if (userStore.isLoggedIn) {
+    try {
+      await saveReadingPositionApi(selectedBook.value.id, pageNum);
+    } catch (_) {}
+  }
+  syncReaderToQuery();
   // 清空当前图片，强制重新加载
   currentPageImage.value = '';
   await nextTick();
@@ -966,7 +1084,35 @@ const formatFileSize = (bytes) => {
 };
 
 onMounted(async () => {
-  loadBooks();
+  await loadBooks();
+  const q = route.query;
+  const bookId = q.book && String(q.book).trim();
+  const pageNum = Math.max(1, parseInt(q.page, 10) || 1);
+  if (bookId && books.value.length > 0) {
+    const book = books.value.find((b) => b.id === bookId);
+    if (book) {
+      selectedBook.value = book;
+      currentPage.value = 1;
+      selectedText.value = '';
+      const chat = getBookChat(book.id);
+      chatMessages.value = chat.messages;
+      chatThreadId.value = chat.threadId ?? null;
+      if (chat.threadId && chat.messages.length === 0) {
+        if (defaultAgentId.value) await loadBookChatHistory(chat);
+        chatMessages.value = chat.messages;
+      }
+      try {
+        const response = await getBookPages(book.id);
+        totalPages.value = response.page_count || 0;
+        const safePage = totalPages.value > 0 ? Math.min(pageNum, totalPages.value) : pageNum;
+        currentPage.value = safePage;
+        await loadPage(safePage);
+        syncReaderToQuery();
+      } catch (err) {
+        console.error('恢复阅读状态失败:', err);
+      }
+    }
+  }
   if (userStore.isLoggedIn) {
     try {
       const res = await agentApi.getDefaultAgent();
@@ -980,8 +1126,8 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* 使用与项目一致的颜色变量 */
-:root {
+/* 变量写在 .reading-container 上，避免刷新后 scoped 下 :root 不生效导致按钮颜色丢失 */
+.reading-container {
   --primary-color: #1A365D;
   --secondary-color: #FF7D00;
   --light-bg: #F7F9FC;
@@ -993,9 +1139,6 @@ onMounted(async () => {
   --gray-50: #F9FAFB;
   --shadow-light: 0 4px 20px rgba(0, 0, 0, 0.05);
   --shadow-hover: 0 10px 25px rgba(0, 0, 0, 0.1);
-}
-
-.reading-container {
   font-family: -apple-system, BlinkMacSystemFont, 'Noto Sans SC', 'Roboto', sans-serif;
   background-color: var(--gray-50);
   min-height: 100vh;
@@ -1643,6 +1786,50 @@ onMounted(async () => {
   font-size: 14px;
   line-height: 1.6;
   white-space: pre-wrap;
+}
+
+.reading-chat-markdown {
+  white-space: normal;
+}
+.reading-chat-markdown h1,
+.reading-chat-markdown h2,
+.reading-chat-markdown h3 {
+  margin: 1em 0 0.5em;
+  font-weight: 600;
+  color: inherit;
+}
+.reading-chat-markdown h1:first-child,
+.reading-chat-markdown h2:first-child,
+.reading-chat-markdown h3:first-child {
+  margin-top: 0;
+}
+.reading-chat-markdown strong {
+  font-weight: 700;
+}
+.reading-chat-markdown p {
+  margin: 0 0 0.5em;
+}
+.reading-chat-markdown p:last-child {
+  margin-bottom: 0;
+}
+.reading-chat-markdown ul,
+.reading-chat-markdown ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+.reading-chat-markdown code {
+  background: var(--gray-200);
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.reading-chat-markdown pre {
+  margin: 0.5em 0;
+  overflow-x: auto;
+}
+.reading-chat-markdown pre code {
+  display: block;
+  padding: 8px 12px;
 }
 
 .reading-chat-typing {

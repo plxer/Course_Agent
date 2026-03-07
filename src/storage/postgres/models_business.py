@@ -71,6 +71,9 @@ class User(Base):
     is_deleted = Column(Integer, nullable=False, default=0, index=True)  # 是否已删除：0=否，1=是
     deleted_at = Column(DateTime, nullable=True)  # 删除时间
 
+    # 习题积分（答对一题积 1 分，用于商城兑换称号）
+    points = Column(Integer, nullable=False, default=0)
+
     # 关联操作日志
     operation_logs = relationship("OperationLog", back_populates="user", cascade="all, delete-orphan")
 
@@ -93,6 +96,7 @@ class User(Base):
             "login_locked_until": format_utc_datetime(self.login_locked_until),
             "is_deleted": self.is_deleted,
             "deleted_at": format_utc_datetime(self.deleted_at),
+            "points": self.points,
         }
         if include_password:
             result["password_hash"] = self.password_hash
@@ -516,3 +520,103 @@ class TaskRecord(Base):
         data.pop("payload", None)
         data.pop("result", None)
         return data
+
+
+class BookReadingPosition(Base):
+    """课本伴读阅读进度：按用户、按书本记录上次阅读页码，跨设备生效"""
+
+    __tablename__ = "book_reading_positions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    book_id = Column(String(255), nullable=False, index=True)  # PDF 文件名不含扩展名
+    page = Column(Integer, nullable=False, default=1)
+    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
+
+    __table_args__ = (UniqueConstraint("user_id", "book_id", name="uq_book_reading_position_user_book"),)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "book_id": self.book_id,
+            "page": self.page,
+            "updated_at": format_utc_datetime(self.updated_at),
+        }
+
+
+class ExerciseAttempt(Base):
+    """习题作答记录：每题一次作答，记录对(1)错(0)，用于错题统计与积分"""
+
+    __tablename__ = "exercise_attempts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    question_type = Column(String(32), nullable=False, index=True)  # choice / fill / short_answer
+    knowledge_point = Column(String(255), nullable=False, index=True)  # 知识点（如章节名）
+    question_content = Column(Text, nullable=False)
+    correct_answer = Column(Text, nullable=False)
+    scoring_points = Column(JSON, nullable=True)  # 简答题得分点列表，用于批改
+    user_answer = Column(Text, nullable=False)
+    is_correct = Column(Integer, nullable=False)  # 1=对，0=错
+    explanation = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now_naive)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "question_type": self.question_type,
+            "knowledge_point": self.knowledge_point,
+            "question_content": self.question_content,
+            "correct_answer": self.correct_answer,
+            "scoring_points": self.scoring_points or [],
+            "user_answer": self.user_answer,
+            "is_correct": self.is_correct,
+            "explanation": self.explanation,
+            "created_at": format_utc_datetime(self.created_at),
+        }
+
+
+class MallItem(Base):
+    """商城商品（称号）：用积分兑换"""
+
+    __tablename__ = "mall_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(64), nullable=False)
+    description = Column(String(255), nullable=True)
+    cost = Column(Integer, nullable=False)  # 所需积分
+    icon = Column(String(64), nullable=True)  # 图标名或 emoji
+    sort_order = Column(Integer, nullable=False, default=0)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "cost": self.cost,
+            "icon": self.icon,
+            "sort_order": self.sort_order,
+        }
+
+
+class UserMallItem(Base):
+    """用户已兑换的称号"""
+
+    __tablename__ = "user_mall_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    mall_item_id = Column(Integer, ForeignKey("mall_items.id"), nullable=False, index=True)
+    acquired_at = Column(DateTime, default=utc_now_naive)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "mall_item_id", name="uq_user_mall_item_user_item"),
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "mall_item_id": self.mall_item_id,
+            "acquired_at": format_utc_datetime(self.acquired_at),
+        }

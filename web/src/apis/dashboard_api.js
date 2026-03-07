@@ -128,5 +128,19 @@ export const dashboardApi = {
    */
   getCallTimeseries: (type = 'models', timeRange = '14days') => {
     return apiAdminGet(`/api/dashboard/stats/calls/timeseries?type=${type}&time_range=${timeRange}`)
+  },
+
+  /**
+   * 获取做题记录列表（运维）
+   * @param {Object} params - limit, offset, user_login（按登录名筛选）
+   * @returns {Promise<Array>}
+   */
+  getExerciseAttempts: (params = {}) => {
+    const q = new URLSearchParams()
+    if (params.limit != null) q.append('limit', params.limit)
+    if (params.offset != null) q.append('offset', params.offset)
+    if (params.user_login) q.append('user_login', params.user_login)
+    const query = q.toString()
+    return apiAdminGet(`/api/dashboard/exercise-attempts${query ? `?${query}` : ''}`)
   }
 }
