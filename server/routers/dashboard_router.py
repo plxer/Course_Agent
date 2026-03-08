@@ -273,7 +273,7 @@ async def get_conversation_detail(
 
 
 class ExerciseAttemptListItem(BaseModel):
-    """做题记录列表项（运维）"""
+    """做题记录列表项（运维）：含题目、用户答案、正确答案与解析，方便管理员查看"""
 
     id: int
     user_login: str
@@ -281,6 +281,12 @@ class ExerciseAttemptListItem(BaseModel):
     knowledge_point: str
     is_correct: int
     created_at: str
+    question_content: str = ""
+    user_answer: str = ""
+    correct_answer: str = ""
+    explanation: str | None = None
+    chapter: str | None = None
+    section_title: str | None = None
 
 
 @dashboard.get("/exercise-attempts", response_model=list[ExerciseAttemptListItem])
@@ -314,6 +320,12 @@ async def get_exercise_attempts(
                 "knowledge_point": att.knowledge_point,
                 "is_correct": att.is_correct,
                 "created_at": att.created_at.isoformat(),
+                "question_content": att.question_content or "",
+                "user_answer": att.user_answer or "",
+                "correct_answer": att.correct_answer or "",
+                "explanation": att.explanation,
+                "chapter": getattr(att, "chapter", None),
+                "section_title": getattr(att, "section_title", None),
             }
             for att, login in rows
         ]

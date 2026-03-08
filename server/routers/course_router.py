@@ -18,6 +18,7 @@ from sqlalchemy import func, select, update
 from src.agents.common import load_chat_model
 from src.services.chat_stream_service import stream_agent_chat
 from src.services.exercise_service import grade_answer, generate_question
+from src.services.textbook_service import get_textbook_chapters
 from src.storage.postgres.models_business import (
     BookReadingPosition,
     ExerciseAttempt,
@@ -373,9 +374,17 @@ async def save_reading_position(
 # --- 习题推荐：出题、作答、错题统计、积分与商城 ---
 
 
+@course.get("/exercises/textbook-chapters")
+async def exercises_textbook_chapters():
+    """获取课本章节目录（先选章节、再选知识点）。"""
+    return {"chapters": get_textbook_chapters()}
+
+
 class ExerciseGenerateRequest(BaseModel):
     question_type: str  # choice / fill / short_answer
     knowledge_point: str
+    chapter: Optional[int] = None  # 章号 1–8，与 knowledge_point 一起时结合课本出题
+    section_id: Optional[str] = None  # 小节 id 如 "1.1"，不填则用整章
 
 
 @course.post("/exercises/generate")
@@ -383,9 +392,14 @@ async def exercises_generate(
     body: ExerciseGenerateRequest,
     current_user: User = Depends(get_required_user),
 ):
-    """根据题型和知识点生成一道题（不落库，提交答案时再记录）。"""
+    """根据题型和知识点生成一道题（不落库，提交答案时再记录）；可选章节时结合课本内容出题。"""
     try:
-        out = await generate_question(body.question_type, body.knowledge_point)
+        out = await generate_question(
+            body.question_type,
+            body.knowledge_point,
+            chapter=body.chapter,
+            section_id=body.section_id,
+        )
         return out
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -398,6 +412,8 @@ class ExerciseSubmitRequest(BaseModel):
     correct_answer: str
     scoring_points: list = []
     user_answer: str
+    chapter: Optional[str] = None  # 章节号，用于错题统计展示
+    section_title: Optional[str] = None  # 小节标题，用于错题统计展示
 
 
 @course.post("/exercises/submit")
@@ -431,6 +447,8 @@ async def exercises_submit(
         user_answer=body.user_answer,
         is_correct=is_correct,
         explanation=explanation,
+        chapter=body.chapter,
+        section_title=body.section_title,
     )
     db.add(attempt)
 
@@ -449,24 +467,174 @@ async def exercises_submit(
     }
 
 
+@course.get("/exercises/wrong-analysis")
+async def exercises_wrong_analysis(
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+    page: int = 1,
+    page_size: int = 20,
+):
+    """错题分析：直接读取与运维「做题记录」同一数据库同一表。
+    数据库：PostgreSQL（环境变量 POSTGRES_URL）；表：exercise_attempts。
+    与 dashboard 的 get_exercise_attempts 使用同一 db、同一 ExerciseAttempt 表，join User 按登录名筛选。"""
+    login = (getattr(current_user, "user_id", None) or "").strip()
+    uid = current_user.id
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)
+    offset = (page - 1) * page_size
+
+    # 与运维一致：join User 按登录名筛选；若登录名为空则回退为按用户 id 筛选
+    use_login = bool(login)
+    if use_login:
+        total_any_q = (
+            select(func.count())
+            .select_from(ExerciseAttempt)
+            .join(User, ExerciseAttempt.user_id == User.id)
+            .where(User.user_id == login)
+        )
+    else:
+        logger.warning("wrong-analysis: current_user.user_id 为空，改用 user.id=%s 筛选", uid)
+        total_any_q = select(func.count()).select_from(ExerciseAttempt).where(ExerciseAttempt.user_id == uid)
+    total_any_result = await db.execute(total_any_q)
+    total_attempts = int(total_any_result.scalar() or 0)
+
+    if use_login:
+        q_kp = (
+            select(ExerciseAttempt.knowledge_point, func.count(ExerciseAttempt.id).label("count"))
+            .select_from(ExerciseAttempt)
+            .join(User, ExerciseAttempt.user_id == User.id)
+            .where(User.user_id == login, ExerciseAttempt.is_correct == 0)
+            .group_by(ExerciseAttempt.knowledge_point)
+        )
+        total_wrong_q = (
+            select(func.count())
+            .select_from(ExerciseAttempt)
+            .join(User, ExerciseAttempt.user_id == User.id)
+            .where(User.user_id == login, ExerciseAttempt.is_correct == 0)
+        )
+        q_list = (
+            select(ExerciseAttempt)
+            .join(User, ExerciseAttempt.user_id == User.id)
+            .where(User.user_id == login, ExerciseAttempt.is_correct == 0)
+            .order_by(ExerciseAttempt.created_at.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
+    else:
+        q_kp = (
+            select(ExerciseAttempt.knowledge_point, func.count(ExerciseAttempt.id).label("count"))
+            .select_from(ExerciseAttempt)
+            .where(ExerciseAttempt.user_id == uid, ExerciseAttempt.is_correct == 0)
+            .group_by(ExerciseAttempt.knowledge_point)
+        )
+        total_wrong_q = (
+            select(func.count())
+            .select_from(ExerciseAttempt)
+            .where(ExerciseAttempt.user_id == uid, ExerciseAttempt.is_correct == 0)
+        )
+        q_list = (
+            select(ExerciseAttempt)
+            .where(ExerciseAttempt.user_id == uid, ExerciseAttempt.is_correct == 0)
+            .order_by(ExerciseAttempt.created_at.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
+
+    result_kp = await db.execute(q_kp)
+    rows_kp = result_kp.all()
+    total_wrong = sum(int(r[1] or 0) for r in rows_kp)
+    by_knowledge_point = []
+    for r in rows_kp:
+        name = (r[0] or "").strip() or "未分类"
+        cnt = int(r[1]) if r[1] is not None else 0
+        if cnt > 0:
+            by_knowledge_point.append({"name": name, "count": cnt})
+
+    total_wrong_result = await db.execute(total_wrong_q)
+    total_count = int(total_wrong_result.scalar() or 0)
+    result_list = await db.execute(q_list)
+    attempts = result_list.scalars().all()
+    items = [a.to_dict() for a in attempts]
+
+    # 无数据时查表总量便于排查
+    debug_table_total = None
+    if total_attempts == 0:
+        r_all = await db.execute(select(func.count()).select_from(ExerciseAttempt))
+        debug_table_total = int(r_all.scalar() or 0)
+        logger.info(
+            "wrong-analysis: login=%r uid=%s total_attempts=0 表中总记录数=%s",
+            login,
+            uid,
+            debug_table_total,
+        )
+    else:
+        logger.info(
+            "wrong-analysis: login=%s total_attempts=%s total_wrong=%s list_page=%s returned=%s",
+            login,
+            total_attempts,
+            total_wrong,
+            page,
+            len(items),
+        )
+    out = {
+        "by_knowledge_point": by_knowledge_point,
+        "total_attempts": total_attempts,
+        "total_wrong": total_wrong,
+        "user_login": login or None,
+        "items": items,
+        "total": total_count,
+        "page": page,
+        "page_size": page_size,
+    }
+    if debug_table_total is not None:
+        out["debug_table_total"] = debug_table_total
+    return out
+
+
 @course.get("/exercises/wrong-stats")
 async def exercises_wrong_stats(
     current_user: User = Depends(get_required_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """按知识点统计答错次数，用于环状图。"""
+    """按知识点统计答错次数，用于环状图。与运维做题记录同源，join User 按 User.user_id 筛选。"""
+    login = (getattr(current_user, "user_id", None) or "").strip()
+    total_any_q = (
+        select(func.count())
+        .select_from(ExerciseAttempt)
+        .join(User, ExerciseAttempt.user_id == User.id)
+        .where(User.user_id == login)
+    )
+    total_any_result = await db.execute(total_any_q)
+    total_attempts = int(total_any_result.scalar() or 0)
     q = (
         select(ExerciseAttempt.knowledge_point, func.count(ExerciseAttempt.id).label("count"))
-        .where(
-            ExerciseAttempt.user_id == current_user.id,
-            ExerciseAttempt.is_correct == 0,
-        )
+        .select_from(ExerciseAttempt)
+        .join(User, ExerciseAttempt.user_id == User.id)
+        .where(User.user_id == login, ExerciseAttempt.is_correct == 0)
         .group_by(ExerciseAttempt.knowledge_point)
     )
     result = await db.execute(q)
     rows = result.all()
-    by_knowledge_point = [{"name": r[0], "count": r[1]} for r in rows]
-    return {"by_knowledge_point": by_knowledge_point}
+    total_wrong = sum(int(r[1] or 0) for r in rows)
+    logger.info(
+        "wrong-stats: login=%s total_attempts=%s total_wrong=%s by_kp_rows=%s",
+        login,
+        total_attempts,
+        total_wrong,
+        len(rows),
+    )
+    by_knowledge_point = []
+    for r in rows:
+        name = (r[0] or "").strip() or "未分类"
+        cnt = int(r[1]) if r[1] is not None else 0
+        if cnt > 0:
+            by_knowledge_point.append({"name": name, "count": cnt})
+    return {
+        "by_knowledge_point": by_knowledge_point,
+        "total_attempts": total_attempts,
+        "total_wrong": total_wrong,
+        "user_login": login or None,
+    }
 
 
 @course.get("/exercises/wrong-list")
@@ -476,29 +644,44 @@ async def exercises_wrong_list(
     page: int = 1,
     page_size: int = 20,
 ):
-    """分页获取当前用户的错题列表。"""
+    """分页获取当前用户的错题列表。与运维做题记录同源，join User 按 User.user_id 筛选。"""
+    login = (getattr(current_user, "user_id", None) or "").strip()
+    page = max(1, page)
+    page_size = min(max(1, page_size), 100)
     offset = (page - 1) * page_size
-    total = await db.execute(
-        select(func.count()).select_from(ExerciseAttempt).where(
-            ExerciseAttempt.user_id == current_user.id,
-            ExerciseAttempt.is_correct == 0,
-        )
+    total_q = (
+        select(func.count())
+        .select_from(ExerciseAttempt)
+        .join(User, ExerciseAttempt.user_id == User.id)
+        .where(User.user_id == login, ExerciseAttempt.is_correct == 0)
     )
-    total_count = total.scalar() or 0
+    total = await db.execute(total_q)
+    total_count = int(total.scalar() or 0)
     q = (
         select(ExerciseAttempt)
-        .where(
-            ExerciseAttempt.user_id == current_user.id,
-            ExerciseAttempt.is_correct == 0,
-        )
+        .join(User, ExerciseAttempt.user_id == User.id)
+        .where(User.user_id == login, ExerciseAttempt.is_correct == 0)
         .order_by(ExerciseAttempt.created_at.desc())
         .offset(offset)
         .limit(page_size)
     )
     result = await db.execute(q)
     attempts = result.scalars().all()
+    logger.info(
+        "wrong-list: login=%s total=%s page=%s returned=%s",
+        login,
+        total_count,
+        page,
+        len(attempts),
+    )
     items = [a.to_dict() for a in attempts]
-    return {"items": items, "total": total_count, "page": page, "page_size": page_size}
+    return {
+        "items": items,
+        "total": total_count,
+        "page": page,
+        "page_size": page_size,
+        "user_login": login or None,
+    }
 
 
 @course.get("/points")

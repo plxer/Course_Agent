@@ -100,6 +100,8 @@ class PostgresManager(metaclass=SingletonMeta):
             return
         stmts = [
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS points INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE exercise_attempts ADD COLUMN IF NOT EXISTS chapter VARCHAR(32)",
+            "ALTER TABLE exercise_attempts ADD COLUMN IF NOT EXISTS section_title VARCHAR(255)",
         ]
         async with self.async_engine.begin() as conn:
             for stmt in stmts:

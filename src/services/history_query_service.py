@@ -68,5 +68,5 @@ async def get_agent_history_view(
 
         history.append(msg_dict)
 
-    logger.info(f"Loaded {len(history)} messages with feedback for thread {thread_id}")
+    logger.info(f"Loaded {len(history)} messages for thread {thread_id}")
     return {"history": history}

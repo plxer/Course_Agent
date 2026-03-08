@@ -127,12 +127,20 @@ export function getVideoUrl(videoId) {
 
 // --- 习题推荐 ---
 
-/** 生成题目：题型 + 知识点 */
-export function exerciseGenerate(questionType, knowledgePoint) {
-  return apiPost('/api/course/exercises/generate', {
+/** 课本章节目录（先选章节再选知识点） */
+export function getTextbookChapters() {
+  return apiGet('/api/course/exercises/textbook-chapters', {}, false)
+}
+
+/** 生成题目：题型 + 知识点；可选 chapter、sectionId 以结合课本出题 */
+export function exerciseGenerate(questionType, knowledgePoint, chapter = null, sectionId = null) {
+  const body = {
     question_type: questionType,
     knowledge_point: knowledgePoint
-  }, {}, true)
+  }
+  if (chapter != null) body.chapter = chapter
+  if (sectionId != null) body.section_id = sectionId
+  return apiPost('/api/course/exercises/generate', body, {}, true)
 }
 
 /** 提交答案 */
@@ -140,12 +148,21 @@ export function exerciseSubmit(payload) {
   return apiPost('/api/course/exercises/submit', payload, {}, true)
 }
 
-/** 错题按知识点统计（环状图） */
+/** 错题分析（与运维做题记录同源）：一次返回按知识点统计 + 错题列表第一页，用于弹窗作图与列表 */
+export function exerciseWrongAnalysis(page = 1, pageSize = 20) {
+  return apiGet(
+    `/api/course/exercises/wrong-analysis?page=${page}&page_size=${pageSize}`,
+    {},
+    true
+  )
+}
+
+/** 错题按知识点统计（环状图），与 wrong-analysis 同源 */
 export function exerciseWrongStats() {
   return apiGet('/api/course/exercises/wrong-stats', {}, true)
 }
 
-/** 错题列表分页 */
+/** 错题列表分页，与 wrong-analysis 同源 */
 export function exerciseWrongList(page = 1, pageSize = 20) {
   return apiGet(
     `/api/course/exercises/wrong-list?page=${page}&page_size=${pageSize}`,

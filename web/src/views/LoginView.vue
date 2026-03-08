@@ -14,23 +14,18 @@
       </div>
     </div>
 
-    <!-- 顶部导航：品牌名称 & 操作按钮 -->
-    <nav class="login-navbar">
-      <div class="navbar-content">
-        <div class="brand-container">
-          <h1 class="brand-text">
-            <span v-if="brandOrgName" class="brand-org">{{ brandOrgName }}</span>
-            <span v-if="brandOrgName && brandName !== brandOrgName" class="brand-separator"></span>
-            <span class="brand-main">{{ brandName }}</span>
-          </h1>
-        </div>
-        <div class="login-top-action">
-          <a-button type="text" size="small" class="back-home-btn" @click="goHome">
-            返回首页
-          </a-button>
+    <!-- 顶部导航：与课程智能体一致 -->
+    <header class="login-header">
+      <div class="login-header-content">
+        <router-link to="/course" class="login-logo">
+          <span class="login-logo-text">{{ courseTitle }}</span>
+        </router-link>
+        <div class="login-auth">
+          <router-link to="/register" class="login-auth-link primary">注册</router-link>
+          <button type="button" class="login-auth-btn" @click="goHome">返回首页</button>
         </div>
       </div>
-    </nav>
+    </header>
 
     <!-- 主要内容区：居中卡片 -->
     <main class="login-main">
@@ -180,29 +175,10 @@
                     </a-button>
                   </a-form-item>
 
-                  <!-- 第三方登录选项 -->
-                  <div class="third-party-login">
-                    <div class="divider">
-                      <span>其他登录方式</span>
-                    </div>
-                    <div class="login-icons">
-                      <a-tooltip title="微信登录">
-                        <a-button shape="circle" class="login-icon" @click="showDevMessage">
-                          <template #icon><wechat-outlined /></template>
-                        </a-button>
-                      </a-tooltip>
-                      <a-tooltip title="企业微信登录">
-                        <a-button shape="circle" class="login-icon" @click="showDevMessage">
-                          <template #icon><qrcode-outlined /></template>
-                        </a-button>
-                      </a-tooltip>
-                      <a-tooltip title="飞书登录">
-                        <a-button shape="circle" class="login-icon" @click="showDevMessage">
-                          <template #icon><thunderbolt-outlined /></template>
-                        </a-button>
-                      </a-tooltip>
-                    </div>
-                  </div>
+                  <p class="register-hint">
+                    没有账号？
+                    <router-link to="/register">去注册</router-link>
+                  </p>
                 </a-form>
               </div>
 
@@ -215,22 +191,6 @@
         </div>
       </div>
     </main>
-
-    <!-- 页面底部：版权信息等 -->
-    <footer class="page-footer">
-      <div class="footer-links">
-        <a href="https://github.com/xerrors" target="_blank">联系我们</a>
-        <span class="divider">|</span>
-        <a href="https://github.com/xerrors/Yuxi-Know" target="_blank">使用帮助</a>
-        <span class="divider">|</span>
-        <a href="https://github.com/xerrors/Yuxi-Know/blob/main/LICENSE" target="_blank"
-          >隐私政策</a
-        >
-      </div>
-      <div class="copyright">
-        &copy; {{ new Date().getFullYear() }} {{ brandName }}. All Rights Reserved.
-      </div>
-    </footer>
   </div>
 </template>
 
@@ -241,14 +201,7 @@ import { useUserStore } from '@/stores/user'
 import { useInfoStore } from '@/stores/info'
 import { message } from 'ant-design-vue'
 import { healthApi } from '@/apis/system_api'
-import {
-  UserOutlined,
-  LockOutlined,
-  WechatOutlined,
-  QrcodeOutlined,
-  ThunderboltOutlined,
-  ExclamationCircleOutlined
-} from '@ant-design/icons-vue'
+import { UserOutlined, LockOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue'
 const router = useRouter()
 const userStore = useUserStore()
 const infoStore = useInfoStore()
@@ -280,6 +233,8 @@ const brandDescription = computed(() => {
   const trimmed = rawDescription.trim()
   return trimmed || '结合知识库与知识图谱，提供更准确、更全面的回答'
 })
+// 顶栏固定标题，与课程页一致
+const courseTitle = '天津大学《计算机网络》课程数智化平台'
 
 // 状态
 const isFirstRun = ref(false)
@@ -514,85 +469,117 @@ onUnmounted(() => {
 </script>
 
 <style lang="less" scoped>
+/* 与课程智能体界面一致（ExercisesView / ConversationView） */
 .login-view {
+  font-family: -apple-system, BlinkMacSystemFont, 'Noto Sans SC', 'Roboto', sans-serif;
+  --primary-color: #1a365d;
+  --primary-color-dark: #153e68;
+  --light-bg: #f7f9fc;
+  --dark-text: #2d3748;
+  --gray-500: #6b7280;
+  --gray-600: #4b5563;
+  --white: #ffffff;
+  --gray-200: #e5e7eb;
+  --gray-50: #f9fafb;
+
   min-height: 100vh;
   width: 100%;
   position: relative;
   display: flex;
   flex-direction: column;
-  background-color: var(--gray-10);
-  background-image: radial-gradient(var(--gray-200) 1px, transparent 1px);
-  background-size: 24px 24px;
+  background-color: var(--gray-50);
+  color: var(--dark-text);
 
   &.has-alert {
     padding-top: 60px;
   }
 }
 
-/* Unified Navbar */
-.login-navbar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  padding: 32px 0;
-  z-index: 10;
-
-  .navbar-content {
-    max-width: 1500px; /* Constraint the width */
-    margin: 0 auto;
-    padding: 0 40px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
+.login-header {
+  flex-shrink: 0;
+  background-color: var(--white);
+  border-bottom: 1px solid var(--gray-200);
 }
 
-.brand-text {
-  margin: 0;
-  font-size: 20px;
+.login-header-content {
+  width: 100%;
+  padding: 12px 24px 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+}
+
+.login-logo {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+  color: inherit;
+}
+
+.login-logo-text {
+  margin-left: 0;
+  color: var(--primary-color);
   font-weight: 600;
-  line-height: 1;
+  font-size: 16px;
+  white-space: nowrap;
+  font-family: -apple-system, BlinkMacSystemFont, 'Noto Sans SC', 'Roboto', sans-serif;
+}
+
+.login-auth {
   display: flex;
   align-items: center;
   gap: 12px;
-
-  .brand-org {
-    color: var(--gray-700);
-    font-weight: 600;
-  }
-
-  .brand-separator {
-    width: 4px;
-    height: 4px;
-    background-color: var(--gray-400);
-    border-radius: 50%;
-    font-weight: 600;
-  }
-
-  .brand-main {
-    color: var(--main-color);
-    font-weight: 600;
-  }
 }
 
-.back-home-btn {
-  color: var(--gray-600);
+.login-auth-link {
+  color: var(--gray-500);
+  text-decoration: none;
   font-size: 14px;
-  &:hover {
-    color: var(--main-color);
-    background-color: transparent;
-  }
+  padding: 6px 12px;
+  border-radius: 6px;
+  transition: color 0.2s, background 0.2s;
 }
 
-/* Main Content: Card Layout */
+.login-auth-link:hover {
+  color: var(--primary-color);
+}
+
+.login-auth-link.primary {
+  color: var(--white);
+  background: var(--primary-color);
+}
+
+.login-auth-link.primary:hover {
+  background: var(--primary-color-dark);
+  color: var(--white);
+}
+
+.login-auth-btn {
+  font-size: 14px;
+  padding: 6px 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--gray-600);
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.login-auth-btn:hover {
+  color: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
 .login-main {
   flex: 1;
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 32px 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
-  padding-top: 80px; /* Add space for navbar */
 }
 
 .login-card {
@@ -600,9 +587,9 @@ onUnmounted(() => {
   max-width: 95vw;
   height: 560px;
   max-height: 80vh;
-  background: var(--gray-0);
+  background: var(--white);
   border-radius: 16px;
-  box-shadow: 0 0px 40px var(--shadow-1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
   display: flex;
   overflow: hidden;
 }
@@ -611,10 +598,9 @@ onUnmounted(() => {
   position: relative;
 }
 
-/* Image Side */
 .card-side.is-image {
   flex: 1.4;
-  background-color: var(--main-10);
+  background-color: var(--light-bg);
   overflow: hidden;
 
   .login-bg-image {
@@ -655,7 +641,7 @@ onUnmounted(() => {
   .init-title {
     font-size: 18px;
     font-weight: 600;
-    color: var(--main-color);
+    color: var(--primary-color);
     margin: 0;
     line-height: 1.4;
   }
@@ -666,64 +652,16 @@ onUnmounted(() => {
     padding: 10px 12px;
     border-radius: 8px;
   }
-  :deep(.ant-btn) {
+  :deep(.ant-btn-primary) {
     height: 44px;
     font-size: 16px;
     border-radius: 8px;
+    background: var(--primary-color);
+    border-color: var(--primary-color);
   }
-}
-
-.third-party-login {
-  margin-top: 16px;
-  .divider {
-    position: relative;
-    text-align: center;
-    margin: 24px 0 16px;
-    &::before,
-    &::after {
-      content: '';
-      position: absolute;
-      top: 50%;
-      width: 30%;
-      height: 1px;
-      background-color: var(--gray-200);
-    }
-    &::before {
-      left: 0;
-    }
-    &::after {
-      right: 0;
-    }
-    span {
-      display: inline-block;
-      padding: 0 8px;
-      background-color: var(--gray-0);
-      color: var(--gray-400);
-      font-size: 12px;
-    }
-  }
-
-  .login-icons {
-    display: flex;
-    justify-content: center;
-    gap: 20px;
-    .login-icon {
-      width: 36px;
-      height: 36px;
-      font-size: 18px;
-      color: var(--gray-500);
-      border-color: var(--gray-300);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s ease;
-      &:hover {
-        color: var(--main-color);
-        border-color: var(--main-color);
-        background-color: var(--main-10);
-        transform: translateY(-2px);
-      }
-    }
+  :deep(.ant-btn-primary:hover) {
+    background: var(--primary-color-dark);
+    border-color: var(--primary-color-dark);
   }
 }
 
@@ -735,64 +673,46 @@ onUnmounted(() => {
 }
 
 .forgot-password {
-  color: var(--main-color);
+  color: var(--primary-color);
   &:hover {
     text-decoration: underline;
+  }
+}
+
+.register-hint {
+  text-align: center;
+  margin: 8px 0 0 0;
+  font-size: 14px;
+  color: var(--gray-500);
+  a {
+    color: var(--primary-color);
+    font-weight: 500;
+    text-decoration: none;
+    &:hover {
+      text-decoration: underline;
+    }
   }
 }
 
 .error-message {
   margin-top: 16px;
   padding: 10px 12px;
-  background-color: var(--color-error-50);
-  border: 1px solid color-mix(in srgb, var(--color-error-500) 25%, transparent);
+  background-color: #fff2f0;
+  border: 1px solid #ffccc7;
   border-radius: 6px;
-  color: var(--color-error-700);
+  color: #cf1322;
   font-size: 13px;
   text-align: center;
 }
 
-/* Page Footer */
-.page-footer {
-  padding: 24px;
-  text-align: center;
-}
-
-.footer-links {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 8px;
-
-  a {
-    color: var(--gray-500);
-    font-size: 13px;
-    &:hover {
-      color: var(--main-color);
-    }
-  }
-
-  .divider {
-    color: var(--gray-300);
-    font-size: 12px;
-  }
-}
-
-.copyright {
-  font-size: 12px;
-  color: var(--gray-400);
-}
-
-/* Server Status Alert */
 .server-status-alert {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   padding: 12px 20px;
-  background: var(--color-error-500);
-  color: var(--gray-0);
+  background: #ff4d4f;
+  color: #fff;
   z-index: 1000;
 
   .alert-content {
@@ -823,31 +743,24 @@ onUnmounted(() => {
     }
 
     :deep(.ant-btn-link) {
-      color: var(--gray-0);
-      border-color: var(--gray-0);
-
+      color: #fff;
+      border-color: #fff;
       &:hover {
-        color: var(--gray-0);
-        background-color: color-mix(in srgb, var(--gray-0) 10%, transparent);
+        color: #fff;
+        background-color: rgba(255, 255, 255, 0.15);
       }
     }
   }
 }
 
 /* Responsive */
-@media (max-width: 1280px) {
-  .login-navbar .navbar-content {
-    padding: 0 40px;
-  }
-}
-
 @media (max-width: 768px) {
-  .login-navbar .navbar-content {
+  .login-header-content {
     padding: 0 20px;
   }
 
-  .brand-text {
-    font-size: 20px;
+  .login-logo-text {
+    font-size: 14px;
   }
 
   .login-card {

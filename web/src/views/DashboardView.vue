@@ -164,7 +164,17 @@
             :pagination="false"
             row-key="id"
             size="small"
+            :expand-row-by-click="true"
           >
+            <template #expandedRowRender="{ record }">
+              <div class="exercise-detail">
+                <p v-if="record.question_content" class="exercise-detail-row"><strong>题目：</strong>{{ record.question_content }}</p>
+                <p class="exercise-detail-row"><strong>我的答案：</strong>{{ record.user_answer || '—' }}</p>
+                <p class="exercise-detail-row"><strong>正确答案：</strong>{{ record.correct_answer || '—' }}</p>
+                <p v-if="record.explanation" class="exercise-detail-row"><strong>解析：</strong>{{ record.explanation }}</p>
+                <p v-if="record.section_title" class="exercise-detail-row exercise-detail-meta"><strong>章节：</strong>{{ record.section_title }}</p>
+              </div>
+            </template>
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'user_login'">
                 <span class="user-display">{{ record.user_login }}</span>
@@ -752,6 +762,29 @@ onUnmounted(() => {
 .user-display {
   color: var(--gray-800);
   font-size: 13px;
+}
+
+.exercise-detail {
+  padding: 8px 0;
+  font-size: 13px;
+  color: var(--gray-700);
+  background: var(--gray-50);
+  margin: 0 -16px;
+  padding: 12px 16px;
+}
+
+.exercise-detail-row {
+  margin: 0 0 8px 0;
+  line-height: 1.5;
+}
+
+.exercise-detail-row:last-child {
+  margin-bottom: 0;
+}
+
+.exercise-detail-meta {
+  color: var(--gray-600);
+  font-size: 12px;
 }
 
 // Dashboard 特有的对话记录样式

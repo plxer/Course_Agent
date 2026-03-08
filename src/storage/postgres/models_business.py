@@ -544,20 +544,22 @@ class BookReadingPosition(Base):
 
 
 class ExerciseAttempt(Base):
-    """习题作答记录：每题一次作答，记录对(1)错(0)，用于错题统计与积分"""
+    """习题作答记录：每题一次作答，记录对(1)错(0)，用于错题统计与积分。含题型、章节、知识点。"""
 
     __tablename__ = "exercise_attempts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     question_type = Column(String(32), nullable=False, index=True)  # choice / fill / short_answer
-    knowledge_point = Column(String(255), nullable=False, index=True)  # 知识点（如章节名）
+    knowledge_point = Column(String(255), nullable=False, index=True)  # 知识点
     question_content = Column(Text, nullable=False)
     correct_answer = Column(Text, nullable=False)
     scoring_points = Column(JSON, nullable=True)  # 简答题得分点列表，用于批改
     user_answer = Column(Text, nullable=False)
     is_correct = Column(Integer, nullable=False)  # 1=对，0=错
     explanation = Column(Text, nullable=True)
+    chapter = Column(String(32), nullable=True, index=True)  # 章节（如 "1"、"2"）
+    section_title = Column(String(255), nullable=True)  # 小节标题，用于展示
     created_at = Column(DateTime, default=utc_now_naive)
 
     def to_dict(self) -> dict[str, Any]:
@@ -572,6 +574,8 @@ class ExerciseAttempt(Base):
             "user_answer": self.user_answer,
             "is_correct": self.is_correct,
             "explanation": self.explanation,
+            "chapter": self.chapter,
+            "section_title": self.section_title,
             "created_at": format_utc_datetime(self.created_at),
         }
 
