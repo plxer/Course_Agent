@@ -21,6 +21,7 @@
             <router-link to="/videos" class="reading-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
             <router-link to="/mall" class="reading-nav-link" :class="{ active: $route.path === '/mall' }">积分商城</router-link>
             <router-link v-if="userStore.isAdmin" to="/ops" class="reading-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
+            <router-link to="/guide" class="reading-nav-link" :class="{ active: $route.path === '/guide' }">使用指南</router-link>
           </div>
           <div class="reading-auth">
             <template v-if="!userStore.isLoggedIn">
@@ -307,8 +308,8 @@ import { agentApi, threadApi } from '@/apis/agent_api.js';
 const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
-const handleLogout = () => { userStore.logout(); router.push('/course'); };
-const handleSwitchAccount = () => { userStore.logout(); router.push('/login'); };
+const handleLogout = () => { userStore.logout(); };
+const handleSwitchAccount = () => { userStore.logout(); };
 
 function renderMarkdown(text) {
   if (!text || typeof text !== 'string') return '';
@@ -1108,6 +1109,11 @@ onMounted(async () => {
         currentPage.value = safePage;
         await loadPage(safePage);
         syncReaderToQuery();
+        // 从 URL 进入指定页时，一并更新阅读缓存（本地 + 服务端），便于下次打开或刷新时停留在该页
+        saveReadingPosition(book.id, safePage);
+        if (userStore.isLoggedIn) {
+          saveReadingPositionApi(book.id, safePage).catch(() => {});
+        }
       } catch (err) {
         console.error('恢复阅读状态失败:', err);
       }

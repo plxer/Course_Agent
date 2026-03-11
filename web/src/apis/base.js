@@ -87,15 +87,12 @@ export async function apiRequest(url, options = {}, requiresAuth = true, respons
 
         message.error(isTokenExpired ? '登录已过期，请重新登录' : '认证失败，请重新登录')
 
-        // 如果用户当前认为自己已登录，则登出
+        // 登出并遣返登录页（store 内会统一 redirect）
         if (userStore.isLoggedIn) {
           userStore.logout()
-        }
-
-        // 使用setTimeout确保消息显示后再跳转
-        setTimeout(() => {
+        } else {
           window.location.href = '/login'
-        }, 1500)
+        }
 
         throw new Error('未授权，请先登录')
       } else if (response.status === 403) {

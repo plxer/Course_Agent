@@ -73,7 +73,9 @@ async def generate_question(
 
 请生成一道题。"""
     else:
-        prompt = f"题型：{question_type}，知识点：{knowledge_point}\n请生成一道题（可参考《计算机网络：自顶向下方法》）。"
+        prompt = (
+            f"题型：{question_type}，知识点：{knowledge_point}\n请生成一道题（可参考《计算机网络：自顶向下方法》）。"
+        )
 
     model = load_chat_model(conf.default_model)
     try:

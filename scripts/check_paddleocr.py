@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """在容器内验证 PaddleOCR 3.x 是否可用（会先注入 langchain 兼容层）。"""
+
 import os
 import sys
 from pathlib import Path

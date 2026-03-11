@@ -4,7 +4,12 @@ import re
 from pathlib import Path
 
 # 课本路径（与 knowledgebase 中一致）
-TEXTBOOK_PATH = Path(__file__).resolve().parents[2] / "knowledgebase" / "ComputerNetworking-TopDown" / "ComputerNetworking-TopDown.md"
+TEXTBOOK_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "knowledgebase"
+    / "ComputerNetworking-TopDown"
+    / "ComputerNetworking-TopDown.md"
+)
 
 # 章标题（与课本目录对应）
 CHAPTER_TITLES = {
@@ -22,11 +27,23 @@ CHAPTER_TITLES = {
 # 结构: chapter_id -> [ {"id": "xxx", "title": "知识点名称", "section_id": "1.1"}, ... ]
 CHAPTER_KNOWLEDGE_POINTS: dict[int, list[dict]] = {
     1: [
-        {"id": "internet_basics", "title": "因特网的定义与组成（主机、链路、分组、路由器、ISP、TCP/IP）", "section_id": "1.1"},
+        {
+            "id": "internet_basics",
+            "title": "因特网的定义与组成（主机、链路、分组、路由器、ISP、TCP/IP）",
+            "section_id": "1.1",
+        },
         {"id": "protocol_standards", "title": "协议与标准（协议的概念、IETF、RFC）", "section_id": "1.1.3"},
-        {"id": "network_edge_access", "title": "网络边缘与接入网（DSL、电缆、FTTH、以太网、WiFi）", "section_id": "1.2"},
+        {
+            "id": "network_edge_access",
+            "title": "网络边缘与接入网（DSL、电缆、FTTH、以太网、WiFi）",
+            "section_id": "1.2",
+        },
         {"id": "physical_media", "title": "物理媒体（双绞线、同轴电缆、光纤、无线电）", "section_id": "1.2.2"},
-        {"id": "packet_circuit_switching", "title": "分组交换与电路交换（存储转发、排队时延、FDM/TDM）", "section_id": "1.3"},
+        {
+            "id": "packet_circuit_switching",
+            "title": "分组交换与电路交换（存储转发、排队时延、FDM/TDM）",
+            "section_id": "1.3",
+        },
         {"id": "network_of_networks", "title": "网络中的网络（ISP 层次、PoP）", "section_id": "1.3.3"},
         {"id": "delay_throughput", "title": "时延与吞吐量（四类时延、端到端时延、吞吐量）", "section_id": "1.4"},
         {"id": "protocol_layers", "title": "协议分层与封装（五层模型、PDU、各层职责）", "section_id": "1.5"},
@@ -107,7 +124,7 @@ def _scan_sections() -> list[tuple[str, int, str]]:
     if not TEXTBOOK_PATH.exists():
         return []
     result = []
-    with open(TEXTBOOK_PATH, "r", encoding="utf-8", errors="replace") as f:
+    with open(TEXTBOOK_PATH, encoding="utf-8", errors="replace") as f:
         for i, line in enumerate(f, 1):
             line = line.strip()
             m = SECTION_HEADER.match(line)
@@ -130,11 +147,15 @@ def get_textbook_chapters() -> list[dict]:
     chapters: list[dict] = []
     for ch_num in sorted(CHAPTER_TITLES.keys()):
         points = CHAPTER_KNOWLEDGE_POINTS.get(ch_num, [])
-        chapters.append({
-            "id": ch_num,
-            "title": CHAPTER_TITLES[ch_num],
-            "knowledge_points": [{"id": p["id"], "title": p["title"], "section_id": p["section_id"]} for p in points],
-        })
+        chapters.append(
+            {
+                "id": ch_num,
+                "title": CHAPTER_TITLES[ch_num],
+                "knowledge_points": [
+                    {"id": p["id"], "title": p["title"], "section_id": p["section_id"]} for p in points
+                ],
+            }
+        )
     return chapters
 
 
@@ -196,11 +217,80 @@ def get_textbook_excerpt(chapter: int | str, section_id: str | None = None, max_
             end_line = 999999
 
     lines = []
-    with open(TEXTBOOK_PATH, "r", encoding="utf-8", errors="replace") as f:
+    with open(TEXTBOOK_PATH, encoding="utf-8", errors="replace") as f:
         all_lines = f.readlines()
     for j in range(start_line - 1, min(end_line - 1, len(all_lines))):
         lines.append(all_lines[j])
     text = "".join(lines).strip()
     if len(text) > max_chars:
-        text = text[: max_chars] + "\n\n…（内容已截断）"
+        text = text[:max_chars] + "\n\n…（内容已截断）"
     return text
+
+
+def _get_all_section_texts() -> list[tuple[str, str, str]]:
+    """扫描课本，返回 (section_id, title, text) 列表，用于按问题检索。"""
+    if not TEXTBOOK_PATH.exists():
+        return []
+    sections = _scan_sections()
+    if not sections:
+        return []
+    with open(TEXTBOOK_PATH, encoding="utf-8", errors="replace") as f:
+        all_lines = f.readlines()
+    result = []
+    for i, (sec_id, start_line, title) in enumerate(sections):
+        end_line = sections[i + 1][1] if i + 1 < len(sections) else len(all_lines) + 1
+        lines = all_lines[start_line - 1 : end_line - 1]
+        text = "".join(lines).strip()
+        if text:
+            result.append((sec_id, title, text))
+    return result
+
+
+def retrieve_from_textbook(
+    query: str,
+    textbook_id: str = "computer_networking",
+    top_k: int = 5,
+    max_chars: int = 8000,
+) -> str:
+    """
+    根据用户问题从课本中检索相关小节，用于对话时作为蓝本作答。
+    textbook_id: 目前仅支持 "computer_networking"（《计算机网络：自顶向下方法》）
+    top_k: 最多返回几个小节
+    max_chars: 检索内容总字符数上限
+    """
+    if textbook_id != "computer_networking":
+        return ""
+    section_list = _get_all_section_texts()
+    if not section_list:
+        return ""
+
+    # 简单关键词打分：查询词在节文本中出现的次数（含标题）
+    def score_section(sec_id: str, title: str, text: str) -> int:
+        combined = f"{title} {text}"
+        # 按空白和常见标点分割查询词（支持中英文）
+        words = [w.strip() for w in re.split(r"[\s,，。、；：]+", query) if len(w.strip()) > 1]
+        if not words:
+            return 0
+        score = 0
+        for w in words:
+            if w.lower() in combined.lower():
+                score += 1
+        return score
+
+    scored = [(score_section(sid, tit, txt), sid, tit, txt) for sid, tit, txt in section_list]
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    selected = [t for t in scored if t[0] > 0][:top_k]
+    if not selected:
+        selected = scored[:top_k]
+
+    parts = []
+    total = 0
+    for _s, sid, tit, txt in selected:
+        block = f"【{sid} {tit}】\n{txt[: max_chars // top_k]}\n"
+        if total + len(block) > max_chars:
+            block = block[: max_chars - total]
+        parts.append(block)
+        total += len(block)
+        if total >= max_chars:
+            break
+    return "\n".join(parts).strip() if parts else ""

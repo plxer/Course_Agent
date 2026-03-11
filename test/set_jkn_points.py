@@ -2,6 +2,7 @@
 将超级管理员 jkn 的积分设置为 10。
 用法（在项目根目录）：docker compose exec api uv run python test/set_jkn_points.py
 """
+
 import asyncio
 import os
 import sys

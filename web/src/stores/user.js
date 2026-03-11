@@ -3,8 +3,10 @@ import { ref, computed } from 'vue'
 import { useAgentStore } from './agent'
 
 export const useUserStore = defineStore('user', () => {
-  // 状态
-  const token = ref(localStorage.getItem('user_token') || '')
+  // 状态：token 优先从 localStorage（记住我）读取，否则从 sessionStorage（本次会话）读取
+  const token = ref(
+    localStorage.getItem('user_token') || sessionStorage.getItem('user_token') || ''
+  )
   const userId = ref(null)
   const username = ref('')
   const userIdLogin = ref('')
@@ -61,8 +63,15 @@ export const useUserStore = defineStore('user', () => {
       departmentId.value = data.department_id || null
       departmentName.value = data.department_name || ''
 
-      // 只保存 token 到本地存储
-      localStorage.setItem('user_token', data.access_token)
+      // 根据「记住我」保存 token：勾选用 localStorage（跨会话），未勾选用 sessionStorage（关浏览器即失效）
+      const rememberMe = credentials.rememberMe !== false
+      if (rememberMe) {
+        localStorage.setItem('user_token', data.access_token)
+        sessionStorage.removeItem('user_token')
+      } else {
+        sessionStorage.setItem('user_token', data.access_token)
+        localStorage.removeItem('user_token')
+      }
 
       return true
     } catch (error) {
@@ -88,8 +97,11 @@ export const useUserStore = defineStore('user', () => {
     const agentStore = useAgentStore()
     agentStore.reset()
 
-    // 只清除 token
     localStorage.removeItem('user_token')
+    sessionStorage.removeItem('user_token')
+
+    // 统一遣返登录页（动态 import 避免与 router 的循环依赖）
+    import('@/router').then((m) => m.default.push('/login'))
   }
 
   async function register(credentials) {

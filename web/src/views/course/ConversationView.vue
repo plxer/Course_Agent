@@ -13,6 +13,7 @@
             <router-link to="/videos" class="conversation-view-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
             <router-link to="/mall" class="conversation-view-nav-link" :class="{ active: $route.path === '/mall' }">积分商城</router-link>
             <router-link v-if="userStore.isAdmin" to="/ops" class="conversation-view-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
+            <router-link to="/guide" class="conversation-view-nav-link" :class="{ active: $route.path === '/guide' }">使用指南</router-link>
           </div>
           <div class="conversation-view-auth">
             <template v-if="!userStore.isLoggedIn">
@@ -109,7 +110,8 @@
                 <div
                   v-if="message.content"
                   class="message-text conversation-view-markdown"
-                  v-html="renderMarkdown(message.content)"
+                  @click="onMessageContentClick"
+                  v-html="renderMarkdownWithPageLinks(message.content)"
                 />
               </template>
             </div>
@@ -140,7 +142,11 @@
                 </ul>
               </div>
               <div v-if="currentAiMessage" :key="`loading-${currentAiMessage.length}`" class="conversation-view-message-with-spinner">
-                <div class="message-text conversation-view-markdown" v-html="renderMarkdown(currentAiMessage)" />
+                <div
+                  class="message-text conversation-view-markdown"
+                  @click="onMessageContentClick"
+                  v-html="renderMarkdownWithPageLinks(currentAiMessage)"
+                />
                 <!-- 转圈单独一行，避免被遮挡；AI 说出「搜索」或收到 tool_calling 时显示 -->
                 <div v-if="showSearchSpinner" class="conversation-view-spinner-row">
                   <span class="conversation-view-spinner-inline" aria-hidden="true"></span>
@@ -158,10 +164,25 @@
 
           <!-- 输入区域 -->
           <div class="conversation-view-input-wrap">
-            <label class="conversation-view-web-search-opt">
-              <input type="checkbox" v-model="enableWebSearch" class="conversation-view-web-search-cb" />
-              <span>启用网络搜索</span>
-            </label>
+            <div class="conversation-view-input-options">
+              <label class="conversation-view-web-search-opt">
+                <input type="checkbox" v-model="enableWebSearch" class="conversation-view-web-search-cb" />
+                <span>启用网络搜索</span>
+              </label>
+              <label class="conversation-view-kb-opt">
+                <span class="conversation-view-kb-label">知识库</span>
+                <select v-model="selectedKnowledgeBase" class="conversation-view-kb-select">
+                  <option value="">无</option>
+                  <option
+                    v-for="kb in courseKnowledgeBases"
+                    :key="kb.id"
+                    :value="kb.id"
+                  >
+                    {{ kb.name }}
+                  </option>
+                </select>
+              </label>
+            </div>
             <div class="conversation-view-input-area">
               <textarea
                 ref="inputTextarea"
@@ -198,10 +219,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue';
+import { ref, computed, onMounted, nextTick, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { marked } from 'marked';
-import { courseChatStream, generateConversationTitle } from '@/apis/courseApi.js';
+import { courseChatStream, generateConversationTitle, listCourseKnowledgeBases, saveReadingPosition } from '@/apis/courseApi.js';
 import { agentApi, threadApi } from '@/apis';
 import { useUserStore } from '@/stores/user';
 import { useCourseConversationStore } from '@/stores/courseConversation';
@@ -211,21 +232,67 @@ const userStore = useUserStore();
 const store = useCourseConversationStore();
 const inputMessage = ref('');
 const enableWebSearch = ref(false);
+/** 选中的课程知识库 id，空表示不检索课本 */
+const selectedKnowledgeBase = ref('');
+/** 课程知识库列表（从接口拉取，用于下拉选项） */
+const courseKnowledgeBases = ref([]);
+
+/** 课本伴读 PDF 的 book_id（用于页码跳转），仅针对计算机网络知识库 */
+const textbookPdfBookId = computed(() => {
+  const kb = courseKnowledgeBases.value.find((k) => k.id === 'computer_networking');
+  return kb?.pdf_book_id || 'ComputerNetworking-TopDown-v8-2021';
+});
+
+// 知识库选择与当前对话绑定：切换下拉时写入当前对话，切到别的界面再回来仍保留
+watch(selectedKnowledgeBase, (val) => {
+  const chat = store.currentChat;
+  if (chat) chat.knowledgeBase = val ?? '';
+});
 
 function renderMarkdown(text) {
   if (!text || typeof text !== 'string') return '';
   return marked.parse(text, { gfm: true, breaks: true });
 }
 
+/** 课本页码偏移：知识库/摘录中显示的第 1 页对应课本第 12 页，故加 11 */
+const TEXTBOOK_PAGE_OFFSET = 11;
+
+/** 渲染 AI 消息：将 **数字**（课本页码）转为可点击跳转课本伴读的链接；并去掉链接后多余的「页」字避免「第35页页」 */
+function renderMarkdownWithPageLinks(text) {
+  let html = renderMarkdown(text);
+  if (!html || !textbookPdfBookId.value) return html;
+  const bookId = textbookPdfBookId.value;
+  html = html.replace(/<strong>(\d+)<\/strong>/g, (_, page) => {
+    const num = parseInt(page, 10);
+    const realPage = num + TEXTBOOK_PAGE_OFFSET;
+    return `<a href="/reading?book=${encodeURIComponent(bookId)}&page=${realPage}" class="conversation-view-page-link" data-book-id="${encodeURIComponent(bookId)}" data-page="${realPage}">第${realPage}页</a>`;
+  });
+  html = html.replace(/<\/a>\s*页/g, '</a>');
+  return html;
+}
+
+function onMessageContentClick(e) {
+  const link = e.target.closest('.conversation-view-page-link');
+  if (!link) return;
+  e.preventDefault();
+  const bookId = link.getAttribute('data-book-id');
+  const page = link.getAttribute('data-page');
+  if (bookId && page) goToReadingPage(bookId, parseInt(page, 10));
+}
+
+function goToReadingPage(bookId, page) {
+  if (!bookId || !page || page < 1) return;
+  if (userStore.isLoggedIn) saveReadingPosition(bookId, page).catch(() => {});
+  router.push({ path: '/reading', query: { book: bookId, page: String(page) } });
+}
+
 const handleLogout = () => {
   store.resetStreamState();
   userStore.logout();
-  router.push('/course');
 };
 const handleSwitchAccount = () => {
   store.resetStreamState();
   userStore.logout();
-  router.push('/login');
 };
 
 const messageBox = ref(null);
@@ -270,12 +337,40 @@ const summarizeChatTitle = async (chat) => {
   }
 };
 
-// 从后端历史记录格式转为页面使用的 messages
+// 从后端历史记录格式转为页面使用的 messages（保留 tool_calls，并从网络搜索结果中提取 sources 用于展示链接）
 function historyToMessages(history) {
   if (!Array.isArray(history)) return [];
   return history
     .filter((m) => m.type === 'human' || m.type === 'ai')
-    .map((m) => ({ role: m.type === 'human' ? 'user' : 'ai', content: m.content || '' }));
+    .map((m) => {
+      const role = m.type === 'human' ? 'user' : 'ai';
+      const base = { role, content: m.content || '' };
+      if (role !== 'ai') return base;
+      // 从 AI 消息的 tool_calls 中提取网络搜索来源，供「参考来源」展示
+      const toolCalls = m.tool_calls;
+      if (!Array.isArray(toolCalls) || toolCalls.length === 0) return base;
+      const sources = [];
+      for (const tc of toolCalls) {
+        const name = (tc.name || tc.function?.name || '').toLowerCase();
+        if (!name.includes('tavily')) continue;
+        const resultContent = tc.tool_call_result?.content;
+        if (!resultContent) continue;
+        let data;
+        try {
+          data = typeof resultContent === 'string' ? JSON.parse(resultContent) : resultContent;
+        } catch {
+          continue;
+        }
+        if (Array.isArray(data.results)) {
+          for (const r of data.results) {
+            if (r?.url) sources.push({ title: r.title || r.url || '', url: r.url });
+          }
+        }
+      }
+      if (sources.length > 0) base.sources = sources;
+      if (toolCalls.length > 0) base.tool_calls = toolCalls;
+      return base;
+    });
 }
 
 // 加载指定 thread 的历史并填入 chat.messages
@@ -313,7 +408,8 @@ const createNewChat = async () => {
         id: thread.id,
         title: thread.title || title,
         messages: [],
-        threadId: thread.id
+        threadId: thread.id,
+        knowledgeBase: selectedKnowledgeBase.value ?? ''
       };
       store.chatList.push(newChat);
       switchChat(newChat.id);
@@ -333,7 +429,8 @@ function createNewChatLocal(title) {
     id: Date.now().toString(),
     title: finalTitle,
     messages: [],
-    threadId: null
+    threadId: null,
+    knowledgeBase: selectedKnowledgeBase.value ?? ''
   };
   store.chatList.push(newChat);
   switchChat(newChat.id);
@@ -348,6 +445,7 @@ const switchChat = async (chatId) => {
   store.setCurrentChatId(chatId);
   store.setThreadId(chat.threadId ?? chat.id);
   inputMessage.value = '';
+  selectedKnowledgeBase.value = chat.knowledgeBase ?? '';
 
   if (userStore.isLoggedIn && store.defaultAgentId) {
     if (chat.messages.length === 0) await loadThreadHistory(chat);
@@ -373,6 +471,19 @@ const deleteChat = async (chatId) => {
   }
 
   store.chatList.splice(index, 1);
+
+  // 仅剩一个对话且该对话未被命名时，改名为「对话1」（未命名 = 无标题或标题为默认「对话 N」；不影响首轮对话总结）
+  if (store.chatList.length === 1) {
+    const remaining = store.chatList[0];
+    const title = remaining.title ? String(remaining.title).trim() : '';
+    const isUnnamed = !title || /^对话\s*\d+$/.test(title);
+    if (isUnnamed) {
+      remaining.title = '对话1';
+      if (userStore.isLoggedIn && store.defaultAgentId && remaining.id) {
+        threadApi.updateThread(remaining.id, '对话1').catch((err) => console.error('更新对话标题失败:', err));
+      }
+    }
+  }
 
   if (store.currentChatId === chatId) {
     if (store.chatList.length > 0) {
@@ -528,7 +639,7 @@ const sendMessage = async () => {
           if (convStore.currentChatId === chatIdForThisRequest) nextTick(() => scrollToBottom());
         }
       },
-      { signal: controller.signal, enableWebSearch: enableWebSearch.value }
+      { signal: controller.signal, enableWebSearch: enableWebSearch.value, knowledgeBase: store.currentChat?.knowledgeBase ?? selectedKnowledgeBase.value }
     );
   } catch (error) {
     if (streamFlushTimer != null) {
@@ -579,12 +690,20 @@ onMounted(async () => {
     document.head.appendChild(link);
   }
 
+  listCourseKnowledgeBases()
+    .then((res) => {
+      courseKnowledgeBases.value = Array.isArray(res?.knowledge_bases) ? res.knowledge_bases : [];
+    })
+    .catch(() => {});
+
   if (!userStore.isLoggedIn) {
     if (store.chatList.length === 0) createNewChat();
+    else selectedKnowledgeBase.value = store.currentChat?.knowledgeBase ?? '';
     return;
   }
 
   if (store.chatList.length > 0) {
+    selectedKnowledgeBase.value = store.currentChat?.knowledgeBase ?? '';
     return;
   }
 
@@ -603,7 +722,8 @@ onMounted(async () => {
       id: t.id,
       title: t.title || `对话 ${t.id}`,
       messages: [],
-      threadId: t.id
+      threadId: t.id,
+      knowledgeBase: ''
     })));
 
     if (store.chatList.length > 0) {
@@ -1110,6 +1230,18 @@ const scrollToBottom = () => {
   padding: 8px 12px;
 }
 
+.conversation-view-markdown .conversation-view-page-link {
+  color: var(--primary-color);
+  text-decoration: none;
+  font-weight: 600;
+  border-bottom: 1px solid var(--primary-color);
+  cursor: pointer;
+}
+
+.conversation-view-markdown .conversation-view-page-link:hover {
+  text-decoration: underline;
+}
+
 /* 流式消息末尾的搜索转圈（单独一行，避免被遮挡） */
 .conversation-view-spinner-row {
   display: flex;
@@ -1203,16 +1335,54 @@ const scrollToBottom = () => {
   background-color: var(--white);
 }
 
+.conversation-view-input-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  padding: 8px 24px 0;
+}
+
 .conversation-view-web-search-opt {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 24px 0;
   margin: 0;
   font-size: 14px;
   color: var(--gray-600);
   cursor: pointer;
   user-select: none;
+}
+
+.conversation-view-kb-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+  color: var(--gray-600);
+  cursor: pointer;
+  user-select: none;
+}
+
+.conversation-view-kb-label {
+  flex-shrink: 0;
+}
+
+.conversation-view-kb-select {
+  padding: 4px 8px;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--dark-text);
+  background: var(--white);
+  cursor: pointer;
+  min-width: 120px;
+}
+
+.conversation-view-kb-select:focus {
+  outline: none;
+  border-color: var(--primary-color);
 }
 
 .conversation-view-web-search-cb {

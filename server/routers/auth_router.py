@@ -86,6 +86,7 @@ class InitializeAdmin(BaseModel):
 
 class RegisterRequest(BaseModel):
     """用户自助注册请求（无需登录）"""
+
     username: str
     password: str
     phone_number: str | None = None

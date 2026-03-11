@@ -10,6 +10,7 @@ from src.storage.postgres.models_business import OperationLog, User
 
 def setup_logging():
     """配置应用程序日志格式"""
+
     # 将「连接归还时被取消」的 ERROR 降为 DEBUG，避免长请求（如流式聊天）结束时的无害竞态刷屏
     class SuppressPoolCancelErrorFilter(logging.Filter):
         def filter(self, record: logging.LogRecord) -> bool:

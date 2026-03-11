@@ -21,6 +21,7 @@
             </router-link>
             <router-link to="/mall" class="videos-nav-link" :class="{ active: $route.path === '/mall' }">积分商城</router-link>
             <router-link v-if="userStore.isAdmin" to="/ops" class="videos-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
+            <router-link to="/guide" class="videos-nav-link" :class="{ active: $route.path === '/guide' }">使用指南</router-link>
           </div>
           <div class="videos-auth">
             <template v-if="!userStore.isLoggedIn">
@@ -46,7 +47,7 @@
       </div>
 
       <!-- 章节筛选 -->
-      <div class="videos-filter-section" v-if="chapters.length > 0">
+      <div class="videos-filter-section" v-if="chapters.length > 0 && !currentVideo">
         <div class="videos-filter-tabs">
           <button 
             class="videos-filter-tab" 
@@ -67,8 +68,62 @@
         </div>
       </div>
 
-      <!-- 视频列表 -->
-      <div class="videos-list-section">
+      <!-- 页面内视频播放区（选中视频时显示） -->
+      <section v-if="currentVideo" class="videos-player-section">
+        <div class="videos-player-header">
+          <button type="button" class="videos-back-btn" @click="closeVideo">
+            <i class="fa fa-arrow-left"></i> 返回列表
+          </button>
+          <h2 class="videos-player-title">{{ currentVideo.name }}</h2>
+          <div class="videos-player-actions">
+            <button
+              type="button"
+              class="videos-summary-btn"
+              :disabled="summaryLoading"
+              @click.stop="openSummary"
+            >
+              {{ summaryLoading ? '加载中…' : '总结视频' }}
+            </button>
+          </div>
+        </div>
+        <div class="videos-player-wrap">
+          <video
+            ref="videoEl"
+            :src="videoUrl"
+            controls
+            autoplay
+            class="videos-player"
+            @timeupdate="onVideoTimeUpdate"
+          >
+            您的浏览器不支持视频播放
+          </video>
+          <div v-if="currentSubtitle" class="videos-subtitle-overlay">
+            {{ currentSubtitle }}
+          </div>
+        </div>
+        <!-- 分段总结面板 -->
+        <div v-if="showSummaryPanel" class="videos-summary-panel">
+          <h4 class="videos-summary-title">分段总结</h4>
+          <p v-if="summaryLoading" class="videos-summary-empty">加载中…</p>
+          <div v-else-if="videoSummary && videoSummary.segments && videoSummary.segments.length" class="videos-summary-list">
+            <button
+              v-for="(seg, i) in videoSummary.segments"
+              :key="i"
+              type="button"
+              class="videos-summary-item"
+              @click="seekTo(seg.start_sec)"
+            >
+              <span class="videos-summary-time">{{ formatTimeRange(seg.start_sec, seg.end_sec) }}</span>
+              <span class="videos-summary-text">{{ seg.title }}</span>
+            </button>
+          </div>
+          <p v-else-if="videoSummaryError" class="videos-summary-error">{{ videoSummaryError }}</p>
+          <p v-else class="videos-summary-empty">暂无总结，请运行脚本生成</p>
+        </div>
+      </section>
+
+      <!-- 视频列表（无选中视频时显示） -->
+      <div v-if="!currentVideo" class="videos-list-section">
         <h2 class="videos-list-title">
           {{ selectedChapter === null ? '所有视频' : `第${selectedChapter}章` }}
         </h2>
@@ -81,12 +136,15 @@
             @click="playVideo(video)"
           >
             <div class="videos-card-thumbnail">
+              <video
+                class="videos-card-video"
+                :src="getVideoUrl(video.id)"
+                preload="metadata"
+                muted
+                playsinline
+              />
               <div class="videos-card-play-overlay">
-                <i class="fa fa-play"></i>
-              </div>
-              <div class="videos-card-placeholder">
-                <i class="fa fa-video-camera"></i>
-                <span>视频</span>
+                <span class="videos-card-play-triangle" aria-hidden="true"></span>
               </div>
             </div>
             <div class="videos-card-content">
@@ -103,46 +161,31 @@
         </div>
       </div>
     </main>
-
-    <!-- 视频播放器模态框 -->
-    <div v-if="currentVideo" class="videos-modal" @click.self="closeVideo">
-      <div class="videos-modal-content">
-        <div class="videos-modal-header">
-          <h3 class="videos-modal-title">{{ currentVideo.name }}</h3>
-          <button class="videos-modal-close" @click="closeVideo">
-            <i class="fa fa-times"></i>
-          </button>
-        </div>
-        <div class="videos-modal-player">
-          <video 
-            :src="videoUrl" 
-            controls 
-            autoplay
-            class="videos-player"
-          >
-            您的浏览器不支持视频播放
-          </video>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue';
+import { ref, onMounted, computed, watch, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { listVideos, getVideoUrl } from '@/apis/courseApi.js';
+import { listVideos, getVideoUrl, getVideoCaption, getVideoSummary } from '@/apis/courseApi.js';
 import { useUserStore } from '@/stores/user';
 
 const router = useRouter();
 const route = useRoute();
 const userStore = useUserStore();
-const handleLogout = () => { userStore.logout(); router.push('/course'); };
-const handleSwitchAccount = () => { userStore.logout(); router.push('/login'); };
+const handleLogout = () => { userStore.logout(); };
+const handleSwitchAccount = () => { userStore.logout(); };
 
 const chapters = ref([]);
 const selectedChapter = ref(null);
 const currentVideo = ref(null);
+const videoEl = ref(null);
+const captionSentences = ref([]);
+const currentSubtitle = ref('');
+const showSummaryPanel = ref(false);
+const videoSummary = ref(null);
+const videoSummaryError = ref('');
+const summaryLoading = ref(false);
 
 // 过滤后的视频列表
 const filteredVideos = computed(() => {
@@ -183,6 +226,12 @@ const playVideo = (video) => {
 // 关闭视频，回到列表
 function closeVideo() {
   currentVideo.value = null;
+  videoEl.value = null;
+  captionSentences.value = [];
+  currentSubtitle.value = '';
+  showSummaryPanel.value = false;
+  videoSummary.value = null;
+  videoSummaryError.value = '';
   if (route.query.video) {
     router.replace({ path: '/videos', query: {} });
   }
@@ -233,6 +282,81 @@ const formatFileSize = (bytes) => {
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
 };
+
+// 格式化时间范围（秒 -> "0:00~1:30"）
+function formatTimeRange(startSec, endSec) {
+  const m1 = Math.floor(startSec / 60);
+  const s1 = Math.floor(startSec % 60);
+  const m2 = Math.floor(endSec / 60);
+  const s2 = Math.floor(endSec % 60);
+  return `${m1}:${String(s1).padStart(2, '0')}~${m2}:${String(s2).padStart(2, '0')}`;
+}
+
+// 视频 timeupdate：根据当前时间显示对应字幕（sentence_timestamps 中 start/end 为毫秒）
+function onVideoTimeUpdate() {
+  const video = videoEl.value;
+  const list = captionSentences.value;
+  if (!video || !list.length) {
+    currentSubtitle.value = '';
+    return;
+  }
+  const tMs = video.currentTime * 1000;
+  const cur = list.find((s) => tMs >= s.start && tMs <= s.end);
+  currentSubtitle.value = cur ? cur.text : '';
+}
+
+// 加载当前视频字幕
+async function loadCaption() {
+  if (!currentVideo.value) return;
+  captionSentences.value = [];
+  try {
+    const data = await getVideoCaption(currentVideo.value.id);
+    const list = data.sentence_timestamps || [];
+    captionSentences.value = list.map((s) => ({ text: s.text || '', start: Number(s.start) || 0, end: Number(s.end) || 0 }));
+  } catch (_) {
+    captionSentences.value = [];
+  }
+}
+
+// 打开总结面板并拉取总结
+async function openSummary() {
+  if (!currentVideo.value) return;
+  showSummaryPanel.value = true;
+  videoSummaryError.value = '';
+  videoSummary.value = null;
+  summaryLoading.value = true;
+  try {
+    const data = await getVideoSummary(currentVideo.value.id);
+    videoSummary.value = data;
+  } catch (e) {
+    videoSummaryError.value = e?.message || '加载总结失败';
+    videoSummary.value = null;
+  } finally {
+    summaryLoading.value = false;
+  }
+  // 展开后滚动到总结面板便于查看
+  await nextTick();
+  const panel = document.querySelector('.videos-summary-panel');
+  if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// 点击时间跳转到指定秒数
+function seekTo(seconds) {
+  const video = videoEl.value;
+  if (!video) return;
+  video.currentTime = Number(seconds) || 0;
+  video.play();
+}
+
+// 当 currentVideo 变化时加载字幕
+watch(currentVideo, (v) => {
+  if (v) {
+    loadCaption();
+    showSummaryPanel.value = false;
+    videoSummary.value = null;
+    videoSummaryError.value = '';
+  }
+});
 
 onMounted(async () => {
   await loadVideos();
@@ -488,6 +612,15 @@ onMounted(async () => {
   background-color: var(--light-bg);
 }
 
+.videos-card-video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .videos-card-play-overlay {
   position: absolute;
   top: 50%;
@@ -500,34 +633,22 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--white);
-  font-size: 24px;
   z-index: 2;
   transition: all 0.3s ease;
+}
+
+.videos-card-play-triangle {
+  width: 0;
+  height: 0;
+  margin-left: 4px;
+  border-style: solid;
+  border-width: 12px 0 12px 22px;
+  border-color: transparent transparent transparent #fff;
 }
 
 .videos-card:hover .videos-card-play-overlay {
   background-color: var(--primary-color);
   transform: translate(-50%, -50%) scale(1.1);
-}
-
-.videos-card-placeholder {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: var(--gray-500);
-  font-size: 48px;
-  gap: 8px;
-}
-
-.videos-card-placeholder span {
-  font-size: 14px;
 }
 
 .videos-card-content {
@@ -569,71 +690,162 @@ onMounted(async () => {
   color: var(--gray-500);
 }
 
-/* 视频播放器模态框 */
-.videos-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.videos-modal-content {
-  background-color: var(--white);
+/* 页面内视频播放区 */
+.videos-player-section {
+  margin-bottom: 32px;
+  background: var(--white);
   border-radius: 12px;
-  width: 90%;
-  max-width: 1200px;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
   overflow: hidden;
+  box-shadow: var(--shadow-light);
 }
 
-.videos-modal-header {
+.videos-player-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 16px 24px;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 20px;
   border-bottom: 1px solid var(--gray-200);
 }
 
-.videos-modal-title {
-  font-size: 18px;
+.videos-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 14px;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--gray-600);
+  cursor: pointer;
+}
+
+.videos-back-btn:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.videos-player-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
   font-weight: 600;
   color: var(--primary-color);
   margin: 0;
 }
 
-.videos-modal-close {
-  background: none;
-  border: none;
-  font-size: 24px;
-  color: var(--gray-500);
-  cursor: pointer;
-  padding: 4px;
-  transition: color 0.3s ease;
-}
-
-.videos-modal-close:hover {
-  color: var(--dark-text);
-}
-
-.videos-modal-player {
-  padding: 24px;
+.videos-player-actions {
   display: flex;
-  justify-content: center;
-  background-color: #000;
+  align-items: center;
+  gap: 8px;
+}
+
+.videos-summary-btn {
+  padding: 6px 14px;
+  font-size: 14px;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--gray-600);
+  cursor: pointer;
+}
+
+.videos-summary-btn:hover:not(:disabled) {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.videos-summary-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.videos-player-wrap {
+  position: relative;
+  width: 100%;
+  background: #000;
 }
 
 .videos-player {
   width: 100%;
-  max-width: 100%;
-  max-height: calc(90vh - 100px);
+  display: block;
+  max-height: 70vh;
+}
+
+.videos-subtitle-overlay {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 90%;
+  padding: 6px 12px;
+  font-size: 16px;
+  line-height: 1.4;
+  border-radius: 4px;
+  text-align: center;
+  pointer-events: none;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.4);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.videos-summary-panel {
+  padding: 16px 20px;
+  border-top: 1px solid var(--gray-200);
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--gray-50);
+}
+
+.videos-summary-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--primary-color);
+  margin: 0 0 12px 0;
+}
+
+.videos-summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.videos-summary-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 10px;
+  text-align: left;
+  border: none;
+  border-radius: 6px;
+  background: var(--white);
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--dark-text);
+  transition: background 0.2s, color 0.2s;
+}
+
+.videos-summary-item:hover {
+  background: var(--light-bg);
+  color: var(--primary-color);
+}
+
+.videos-summary-time {
+  flex-shrink: 0;
+  color: var(--gray-500);
+  font-variant-numeric: tabular-nums;
+}
+
+.videos-summary-text {
+  flex: 1;
+}
+
+.videos-summary-error,
+.videos-summary-empty {
+  margin: 0;
+  font-size: 14px;
+  color: var(--gray-500);
 }
 
 /* 响应式设计 */
@@ -669,20 +881,12 @@ onMounted(async () => {
     grid-template-columns: 1fr;
   }
   
-  .videos-modal-content {
-    width: 100%;
-    height: 100%;
-    max-height: 100%;
+  .videos-player-section {
     border-radius: 0;
   }
   
-  .videos-modal-player {
-    padding: 0;
-    height: calc(100vh - 80px);
-  }
-  
   .videos-player {
-    height: 100%;
+    max-height: 50vh;
   }
 }
 </style>

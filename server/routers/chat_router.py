@@ -631,9 +631,7 @@ async def list_threads(
     current_user: User = Depends(get_required_user),
 ):
     """获取用户的所有对话线程 (使用新存储系统)。source=reading 时仅返回课本伴读对话。"""
-    return await list_threads_view(
-        agent_id=agent_id, db=db, current_user_id=str(current_user.id), source=source
-    )
+    return await list_threads_view(agent_id=agent_id, db=db, current_user_id=str(current_user.id), source=source)
 
 
 @chat.delete("/thread/{thread_id}")

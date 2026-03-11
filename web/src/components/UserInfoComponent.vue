@@ -270,8 +270,6 @@ const userRoleClass = computed(() => {
 const logout = () => {
   userStore.logout()
   message.success('已退出登录')
-  // 跳转到首页
-  router.push('/login')
 }
 
 // 前往登录页

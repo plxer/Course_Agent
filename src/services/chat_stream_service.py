@@ -346,6 +346,34 @@ async def stream_agent_chat(
 
     messages = [human_message]
 
+    # 课程知识库：若本次请求带上了课本检索上下文，则将其与用户问题一起放入首条消息，便于模型基于课本作答
+    course_context = config.get("course_knowledge_context")
+    if course_context and isinstance(course_context, str) and course_context.strip():
+        enable_web = config.get("enable_web_search") is True
+        page_instruction = (
+            "仅以 **数字** 形式给出页码（如 **35**、**36**），不要在 **数字** 后面再写「页」字，"
+            "前端会自动将 **数字** 显示为「第N页」可点击链接。"
+        )
+        web_instruction = ""
+        if enable_web:
+            web_instruction = (
+                "\n若本对话已开启网络搜索，请优先严格依据上述课本摘录作答，"
+                "必要时再使用网络搜索工具补充或核实最新信息，使课本与网络内容紧密配合。\n\n"
+            )
+        wrapped_content = (
+            "以下是从《计算机网络：自顶向下方法》课本中检索到的相关内容，请严格基于课本摘录作答。\n\n"
+            "重要说明：摘录中形如 **数字**（如 **327**）的是原书 PDF 页码。请你：\n"
+            "1. 先简要列出该题涉及的知识点；\n"
+            "2. 再给出对应课本页码。" + page_instruction + "\n\n"
+            + web_instruction
+            + "【课本摘录】\n"
+            f"{course_context.strip()}\n\n"
+            "【用户问题】\n"
+            f"{query}"
+        )
+        human_message = HumanMessage(content=wrapped_content)
+        messages = [human_message]
+
     user_id = str(current_user.id)
     department_id = current_user.department_id
     if not department_id:

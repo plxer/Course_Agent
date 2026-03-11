@@ -2,12 +2,10 @@
 
 import asyncio
 import os
-import time
 import traceback
 from functools import partial
 from typing import Any
 
-from src import config
 from src.knowledge.base import FileStatus, KnowledgeBase
 from src.knowledge.indexing import process_file_to_markdown
 from src.knowledge.utils.kb_utils import (
@@ -353,17 +351,19 @@ class ChromaKB(KnowledgeBase):
             meta = meta_list[i] if i < len(meta_list) else {}
             if file_name and file_name not in (meta.get("source") or ""):
                 continue
-            retrieved.append({
-                "content": doc,
-                "metadata": {
-                    "source": meta.get("source", ""),
-                    "chunk_id": meta.get("chunk_id"),
-                    "file_id": meta.get("file_id"),
-                    "chunk_index": meta.get("chunk_index"),
-                },
-                "score": similarity,
-                "distance": dist,
-            })
+            retrieved.append(
+                {
+                    "content": doc,
+                    "metadata": {
+                        "source": meta.get("source", ""),
+                        "chunk_id": meta.get("chunk_id"),
+                        "file_id": meta.get("file_id"),
+                        "chunk_index": meta.get("chunk_index"),
+                    },
+                    "score": similarity,
+                    "distance": dist,
+                }
+            )
 
         if not retrieved:
             return []
@@ -441,11 +441,13 @@ class ChromaKB(KnowledgeBase):
                 doc_chunks = []
                 for i, doc in enumerate(docs):
                     meta = metas[i] if i < len(metas) else {}
-                    doc_chunks.append({
-                        "id": meta.get("chunk_id", ids[i] if i < len(ids) else ""),
-                        "content": doc,
-                        "chunk_order_index": meta.get("chunk_index", i),
-                    })
+                    doc_chunks.append(
+                        {
+                            "id": meta.get("chunk_id", ids[i] if i < len(ids) else ""),
+                            "content": doc,
+                            "chunk_order_index": meta.get("chunk_index", i),
+                        }
+                    )
                 doc_chunks.sort(key=lambda x: x.get("chunk_order_index", 0))
                 content_info["lines"] = doc_chunks
             except Exception as e:

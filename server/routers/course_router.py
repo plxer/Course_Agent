@@ -1,13 +1,14 @@
 """课程智能体路由：课本伴读、视频伴读、课程对话流。"""
 
 import os
+import re
+import json
 import uuid
 from pathlib import Path
-from typing import Optional
 
 import fitz
-from fastapi import APIRouter, Body, Depends, HTTPException
-from fastapi.responses import Response, StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response, StreamingResponse, FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +19,7 @@ from sqlalchemy import func, select, update
 from src.agents.common import load_chat_model
 from src.services.chat_stream_service import stream_agent_chat
 from src.services.exercise_service import grade_answer, generate_question
-from src.services.textbook_service import get_textbook_chapters
+from src.services.textbook_service import get_textbook_chapters, retrieve_from_textbook
 from src.storage.postgres.models_business import (
     BookReadingPosition,
     ExerciseAttempt,
@@ -35,6 +36,7 @@ course = APIRouter(prefix="/course", tags=["course"])
 # 课本目录：环境变量 KNOWLEDGEBASE_DIR 或默认 knowledgebase（相对项目根）
 _KNOWLEDGEBASE_DIR = os.environ.get("KNOWLEDGEBASE_DIR", "knowledgebase")
 _BOOKS_DIR = Path(_KNOWLEDGEBASE_DIR).resolve() / "books"
+_VIDEOS_DIR = Path(_KNOWLEDGEBASE_DIR).resolve() / "videos"
 
 
 def _books_dir() -> Path:
@@ -68,18 +70,109 @@ def _list_pdf_books() -> list[dict]:
     return out
 
 
+# --- 视频列表与播放（knowledgebase/videos，文件名含 Chapter数字 按章节归类）---
+
+
+def _list_videos() -> list[dict]:
+    """扫描 videos 目录（含子目录）下的 .mp4，按文件名中的 Chapter 数字分组，返回 chapters 列表。"""
+    root = _VIDEOS_DIR
+    if not root.is_dir():
+        return []
+    chapter_re = re.compile(r"Chapter\s*(\d+)", re.IGNORECASE)
+    by_chapter: dict[int, list[dict]] = {}
+    for path in root.rglob("*.mp4"):
+        try:
+            stat = path.stat()
+            stem = path.stem
+            name = path.name
+            m = chapter_re.search(stem)
+            ch = int(m.group(1)) if m else 0
+            if ch not in by_chapter:
+                by_chapter[ch] = []
+            by_chapter[ch].append({"id": stem, "name": name, "size": stat.st_size})
+        except (OSError, ValueError):
+            continue
+    for vlist in by_chapter.values():
+        vlist.sort(key=lambda x: x["name"])
+    chapters = [{"chapter": ch, "videos": vlist} for ch, vlist in sorted(by_chapter.items())]
+    return chapters
+
+
+def _resolve_video_path(video_id: str) -> Path | None:
+    """根据 video_id（文件名不含扩展名）解析视频路径。"""
+    root = _VIDEOS_DIR
+    if not root.is_dir():
+        return None
+    for path in root.rglob("*.mp4"):
+        if path.stem == video_id:
+            return path
+    return None
+
+
+@course.get("/videos")
+def list_videos():
+    """视频列表（按章节）：knowledgebase/videos 下含 Chapter数字 的 .mp4 按章节归类。"""
+    return {"chapters": _list_videos()}
+
+
+@course.get("/videos/{video_id}")
+def get_video(video_id: str):
+    """视频文件流，支持 Range 便于拖动进度。"""
+    path = _resolve_video_path(video_id)
+    if not path or not path.is_file():
+        raise HTTPException(status_code=404, detail="视频不存在")
+    return FileResponse(path, media_type="video/mp4", filename=path.name)
+
+
+@course.get("/videos/{video_id}/caption")
+def get_video_caption(video_id: str):
+    """返回视频字幕 JSON（knowledgebase/videos/caption/{video_id}.json），含 sentence_timestamps。"""
+    caption_path = _VIDEOS_DIR / "caption" / f"{video_id}.json"
+    if not caption_path.is_file():
+        raise HTTPException(status_code=404, detail="该视频暂无字幕")
+    try:
+        with open(caption_path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data
+    except (json.JSONDecodeError, OSError) as e:
+        raise HTTPException(status_code=500, detail=f"读取字幕失败: {e!s}") from e
+
+
+@course.get("/videos/{video_id}/summary")
+def get_video_summary(video_id: str):
+    """返回视频分段总结 JSON（knowledgebase/videos/summary/{video_id}.json），用于「总结视频」展示与跳转。"""
+    summary_path = _VIDEOS_DIR / "summary" / f"{video_id}.json"
+    if not summary_path.is_file():
+        raise HTTPException(status_code=404, detail="该视频暂无总结")
+    try:
+        with open(summary_path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data
+    except (json.JSONDecodeError, OSError) as e:
+        raise HTTPException(status_code=500, detail=f"读取总结失败: {e!s}") from e
+
+
 # --- 课程对话流（课本伴读侧边栏、对话页共用）---
+
+
+# 课程知识库列表：用户可在对话页选择，选中后对话会先检索对应课本再作答
+# pdf_book_id：对应课本伴读中的 PDF（knowledgebase/books 下文件名不含扩展名），用于页码跳转
+COURSE_KNOWLEDGE_BASES = [
+    {"id": "computer_networking", "name": "计算机网络", "pdf_book_id": "ComputerNetworking-TopDown-v8-2021"},
+]
 
 
 class CourseChatRequest(BaseModel):
     query: str
-    thread_id: Optional[str] = None
+    thread_id: str | None = None
     meta: dict = {}
-    enable_web_search: Optional[bool] = None  # 本次对话是否启用网络搜索，不传则用智能体/部门配置
+    enable_web_search: bool | None = None  # 本次对话是否启用网络搜索，不传则用智能体/部门配置
+    knowledge_base: str | None = None  # 课程知识库 id，如 "computer_networking" 表示先检索《计算机网络》课本再作答
 
 
 class ConversationTitleRequest(BaseModel):
     """根据首轮一问一答生成对话标题"""
+
     first_question: str
     first_answer: str
 
@@ -117,6 +210,12 @@ async def generate_conversation_title(
         return {"title": fallback[:20] + "…" if len(fallback) > 20 else fallback}
 
 
+@course.get("/knowledge-bases")
+def list_course_knowledge_bases():
+    """课程对话可选的知识库列表，选中后对话会先检索对应课本再作答。"""
+    return {"knowledge_bases": COURSE_KNOWLEDGE_BASES}
+
+
 @course.post("/chat/stream")
 async def course_chat_stream(
     request: CourseChatRequest,
@@ -140,16 +239,24 @@ async def course_chat_stream(
     config = {"thread_id": thread_id}
     if request.enable_web_search is not None:
         config["enable_web_search"] = request.enable_web_search
+    # 仅当用户选择了课程知识库（非「无」）时才检索课本并注入；知识库选择无时不调用
+    kb_id = (request.knowledge_base or "").strip()
+    if kb_id:
+        context = retrieve_from_textbook(request.query, textbook_id=kb_id)
+        if context:
+            config["course_knowledge_context"] = context
     meta = request.meta or {}
     if "request_id" not in meta or not meta.get("request_id"):
         meta["request_id"] = str(uuid.uuid4())
-    meta.update({
-        "query": request.query,
-        "agent_id": agent_id,
-        "thread_id": thread_id,
-        "user_id": current_user.id,
-        "has_image": False,
-    })
+    meta.update(
+        {
+            "query": request.query,
+            "agent_id": agent_id,
+            "thread_id": thread_id,
+            "user_id": current_user.id,
+            "has_image": False,
+        }
+    )
     # 前端可传 meta.source（如 "reading"），写入对话 metadata，问答页列表会排除 source=reading
 
     return StreamingResponse(
@@ -267,9 +374,11 @@ def ocr_text_selection(body: OcrRequest):
             text = ""
             try:
                 from src.plugins.paddle_ocr_processor import PaddleOcrProcessor
+
                 proc = PaddleOcrProcessor()
                 if proc.check_health().get("status") == "healthy":
                     import tempfile
+
                     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                         tmp.write(img_bytes)
                         tmp.flush()
@@ -284,9 +393,11 @@ def ocr_text_selection(body: OcrRequest):
             if not text:
                 try:
                     from src.plugins.rapid_ocr_processor import RapidOcrProcessor
+
                     proc = RapidOcrProcessor()
                     if proc.check_health().get("status") == "healthy":
                         import tempfile
+
                         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                             tmp.write(img_bytes)
                             tmp.flush()
@@ -383,8 +494,8 @@ async def exercises_textbook_chapters():
 class ExerciseGenerateRequest(BaseModel):
     question_type: str  # choice / fill / short_answer
     knowledge_point: str
-    chapter: Optional[int] = None  # 章号 1–8，与 knowledge_point 一起时结合课本出题
-    section_id: Optional[str] = None  # 小节 id 如 "1.1"，不填则用整章
+    chapter: int | None = None  # 章号 1–8，与 knowledge_point 一起时结合课本出题
+    section_id: str | None = None  # 小节 id 如 "1.1"，不填则用整章
 
 
 @course.post("/exercises/generate")
@@ -412,8 +523,8 @@ class ExerciseSubmitRequest(BaseModel):
     correct_answer: str
     scoring_points: list = []
     user_answer: str
-    chapter: Optional[str] = None  # 章节号，用于错题统计展示
-    section_title: Optional[str] = None  # 小节标题，用于错题统计展示
+    chapter: str | None = None  # 章节号，用于错题统计展示
+    section_title: str | None = None  # 小节标题，用于错题统计展示
 
 
 @course.post("/exercises/submit")
@@ -714,14 +825,10 @@ async def _ensure_mall_items(db: AsyncSession):
             db.add(MallItem(name=name, description=desc, cost=cost, icon=icon, sort_order=order))
     # 已有数据也做一次迁移：把 cost 限制在 1～100，并把默认 5 个称号的文案与 cost 同步
     await db.execute(
-        update(MallItem).values(
-            cost=func.least(func.greatest(MallItem.cost, MALL_COST_MIN), MALL_COST_MAX)
-        )
+        update(MallItem).values(cost=func.least(func.greatest(MallItem.cost, MALL_COST_MIN), MALL_COST_MAX))
     )
     for name, desc, cost, icon, order in _DEFAULT_MALL_ITEMS:
-        await db.execute(
-            update(MallItem).where(MallItem.name == name).values(description=desc, cost=cost)
-        )
+        await db.execute(update(MallItem).where(MallItem.name == name).values(description=desc, cost=cost))
 
 
 @course.get("/mall")
@@ -791,8 +898,10 @@ async def mall_my_titles(
     out = []
     for row in rows:
         mall_item, acquired_at = row[0], row[1]
-        out.append({
-            "item": mall_item.to_dict(),
-            "acquired_at": format_utc_datetime(acquired_at) if acquired_at else None,
-        })
+        out.append(
+            {
+                "item": mall_item.to_dict(),
+                "acquired_at": format_utc_datetime(acquired_at) if acquired_at else None,
+            }
+        )
     return {"items": out}

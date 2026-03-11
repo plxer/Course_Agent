@@ -718,6 +718,7 @@ async def get_dashboard_stats(
         total_exercise_attempts = 0
         try:
             from src.storage.postgres.models_business import ExerciseAttempt
+
             ex_result = await db.execute(select(func.count(ExerciseAttempt.id)))
             total_exercise_attempts = ex_result.scalar() or 0
         except Exception:

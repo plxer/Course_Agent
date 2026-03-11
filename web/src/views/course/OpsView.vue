@@ -13,6 +13,7 @@
             <router-link to="/videos" class="ops-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
             <router-link to="/mall" class="ops-nav-link" :class="{ active: $route.path === '/mall' }">积分商城</router-link>
             <router-link v-if="userStore.isAdmin" to="/ops" class="ops-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
+            <router-link to="/guide" class="ops-nav-link" :class="{ active: $route.path === '/guide' }">使用指南</router-link>
           </div>
           <div class="ops-auth">
             <template v-if="!userStore.isLoggedIn">
@@ -48,11 +49,9 @@ const router = useRouter()
 const userStore = useUserStore()
 const handleLogout = () => {
   userStore.logout()
-  router.push('/course')
 }
 const handleSwitchAccount = () => {
   userStore.logout()
-  router.push('/login')
 }
 
 const OPS_CHART_COLORS = [

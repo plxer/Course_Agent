@@ -23,7 +23,7 @@ export async function generateConversationTitle(firstQuestion, firstAnswer) {
   return data?.title ?? null
 }
 
-/** 课程对话流（需登录），options.signal 可传入 AbortSignal 用于停止，options.meta 会传给后端，options.enableWebSearch 为 true 时本次对话启用网络搜索 */
+/** 课程对话流（需登录），options.signal 可传入 AbortSignal 用于停止，options.meta 会传给后端，options.enableWebSearch 为 true 时本次对话启用网络搜索，options.knowledgeBase 为课程知识库 id 时先检索课本再作答 */
 export async function courseChatStream(query, threadId = null, onChunk = null, options = {}) {
   const userStore = (await import('@/stores/user')).useUserStore()
   const headers = { 'Content-Type': 'application/json', ...(userStore.getAuthHeaders?.() || {}) }
@@ -32,10 +32,13 @@ export async function courseChatStream(query, threadId = null, onChunk = null, o
     throw new Error('请先登录后再使用对话功能')
   }
 
-  const { signal, meta, enableWebSearch } = options
+  const { signal, meta, enableWebSearch, knowledgeBase } = options
   const body = { query, thread_id: threadId, meta: meta || {} }
   if (enableWebSearch !== undefined && enableWebSearch !== null) {
     body.enable_web_search = Boolean(enableWebSearch)
+  }
+  if (knowledgeBase !== undefined && knowledgeBase !== null && String(knowledgeBase).trim()) {
+    body.knowledge_base = String(knowledgeBase).trim()
   }
   const response = await fetch('/api/course/chat/stream', {
     method: 'POST',
@@ -123,6 +126,21 @@ export function listVideos() {
 /** 视频播放 URL */
 export function getVideoUrl(videoId) {
   return `/api/course/videos/${encodeURIComponent(videoId)}`
+}
+
+/** 视频字幕（sentence_timestamps 等），不存在则 404 */
+export function getVideoCaption(videoId) {
+  return apiGet(`/api/course/videos/${encodeURIComponent(videoId)}/caption`, {}, false)
+}
+
+/** 视频分段总结（用于总结视频按钮），不存在则 404 */
+export function getVideoSummary(videoId) {
+  return apiGet(`/api/course/videos/${encodeURIComponent(videoId)}/summary`, {}, false)
+}
+
+/** 课程对话可选的知识库列表（选中后对话会先检索对应课本再作答） */
+export function listCourseKnowledgeBases() {
+  return apiGet('/api/course/knowledge-bases', {}, false)
 }
 
 // --- 习题推荐 ---

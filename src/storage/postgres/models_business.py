@@ -613,9 +613,7 @@ class UserMallItem(Base):
     mall_item_id = Column(Integer, ForeignKey("mall_items.id"), nullable=False, index=True)
     acquired_at = Column(DateTime, default=utc_now_naive)
 
-    __table_args__ = (
-        UniqueConstraint("user_id", "mall_item_id", name="uq_user_mall_item_user_item"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "mall_item_id", name="uq_user_mall_item_user_item"),)
 
     def to_dict(self) -> dict[str, Any]:
         return {

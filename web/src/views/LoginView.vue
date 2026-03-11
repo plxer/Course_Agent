@@ -21,6 +21,7 @@
           <span class="login-logo-text">{{ courseTitle }}</span>
         </router-link>
         <div class="login-auth">
+          <router-link to="/guide" class="login-auth-link">使用指南</router-link>
           <router-link to="/register" class="login-auth-link primary">注册</router-link>
           <button type="button" class="login-auth-btn" @click="goHome">返回首页</button>
         </div>
@@ -154,10 +155,8 @@
 
                   <a-form-item>
                     <div class="login-options">
-                      <a-checkbox v-model:checked="rememberMe" @click="showDevMessage"
-                        >记住我</a-checkbox
-                      >
-                      <a class="forgot-password" @click="showDevMessage">忘记密码?</a>
+                      <a-checkbox v-model:checked="rememberMe">记住我</a-checkbox>
+                      <a class="forgot-password" href="javascript:void(0)">忘记密码?</a>
                     </div>
                   </a-form-item>
 
@@ -240,7 +239,8 @@ const courseTitle = '天津大学《计算机网络》课程数智化平台'
 const isFirstRun = ref(false)
 const loading = ref(false)
 const errorMessage = ref('')
-const rememberMe = ref(false)
+// 恢复上次登录时的「记住我」勾选状态
+const rememberMe = ref(localStorage.getItem('remember_me') === '1')
 const serverStatus = ref('loading')
 const serverError = ref('')
 const healthChecking = ref(false)
@@ -263,11 +263,6 @@ const adminForm = reactive({
   confirmPassword: '',
   phone_number: '' // 手机号字段（可选）
 })
-
-// 开发中功能提示
-const showDevMessage = () => {
-  message.info('该功能正在开发中，敬请期待！')
-}
 
 const goHome = () => {
   router.push('/')
@@ -341,9 +336,11 @@ const handleLogin = async () => {
 
     await userStore.login({
       loginId: loginForm.loginId,
-      password: loginForm.password
+      password: loginForm.password,
+      rememberMe: rememberMe.value
     })
 
+    localStorage.setItem('remember_me', rememberMe.value ? '1' : '0')
     message.success('登录成功')
 
     // 登录后统一跳转课程智能体；若有保存的访问路径则优先跳转该路径
