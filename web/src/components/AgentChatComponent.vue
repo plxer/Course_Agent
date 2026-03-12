@@ -757,7 +757,10 @@ const sendMessage = async ({
     query: text,
     config: {
       thread_id: threadId,
-      ...(selectedAgentConfigId.value ? { agent_config_id: selectedAgentConfigId.value } : {})
+      ...(selectedAgentConfigId.value ? { agent_config_id: selectedAgentConfigId.value } : {}),
+      // 每轮请求携带当前侧栏的联网搜索、知识库配置，避免中途切换后仍用旧配置
+      enable_web_search: Boolean(agentConfig.value?.enable_web_search),
+      knowledges: Array.isArray(agentConfig.value?.knowledges) ? agentConfig.value.knowledges : []
     }
   }
 

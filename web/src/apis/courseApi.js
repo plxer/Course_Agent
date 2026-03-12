@@ -108,6 +108,11 @@ export function ocrTextSelection(bookId, pageNum, x, y, width, height) {
   )
 }
 
+/** 选区文本翻译（英译汉，需登录，结果不保留） */
+export function translateText(text) {
+  return apiPost('/api/course/translate', { text: String(text || '').trim() }, {}, true)
+}
+
 /** 获取阅读进度（需登录），返回 { page: number | null } */
 export function getReadingPosition(bookId) {
   return apiGet(`/api/course/reading-position?book_id=${encodeURIComponent(bookId)}`, {}, true)

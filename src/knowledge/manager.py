@@ -177,9 +177,10 @@ class KnowledgeBaseManager:
             kb_instance = self._get_or_create_kb_instance(row.kb_type or "lightrag")
             db_info = kb_instance.get_database_info(row.db_id)
             if db_info:
-                # 补充 share_config 和 additional_params
+                # 补充 share_config、additional_params 与 kb_type（供按类型筛选）
                 db_info["share_config"] = row.share_config or {"is_shared": True, "accessible_departments": []}
                 db_info["additional_params"] = row.additional_params or {}
+                db_info["kb_type"] = row.kb_type or "lightrag"
                 all_databases.append(db_info)
         return {"databases": all_databases}
 

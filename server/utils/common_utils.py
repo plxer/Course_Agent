@@ -33,6 +33,9 @@ def setup_logging():
     uvicorn_logger = logging.getLogger("uvicorn")
     uvicorn_access_logger = logging.getLogger("uvicorn.access")
 
+    # 禁止 pymilvus 的 INFO/DEBUG 输出，避免控制台刷屏影响调试
+    logging.getLogger("pymilvus").setLevel(logging.WARNING)
+
     # 禁用默认的uvicorn访问日志（因为我们使用自定义中间件）
     uvicorn_access_logger.handlers.clear()
 

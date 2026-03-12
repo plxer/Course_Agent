@@ -231,11 +231,15 @@ const router = useRouter();
 const userStore = useUserStore();
 const store = useCourseConversationStore();
 const inputMessage = ref('');
+/** 启用网络搜索：与当前对话绑定，切换对话或切回页面时从 store 恢复 */
 const enableWebSearch = ref(false);
-/** 选中的课程知识库 id，空表示不检索课本 */
+/** 选中的课程知识库 id，空表示不检索课本；与当前对话绑定 */
 const selectedKnowledgeBase = ref('');
 /** 课程知识库列表（从接口拉取，用于下拉选项） */
 const courseKnowledgeBases = ref([]);
+
+/** 默认知识库 id（计算机网络）。仅用于新建对话的初始值；某对话改为「无」后只影响该对话，新建对话仍用此默认。 */
+const DEFAULT_KNOWLEDGE_BASE_ID = 'computer_networking';
 
 /** 课本伴读 PDF 的 book_id（用于页码跳转），仅针对计算机网络知识库 */
 const textbookPdfBookId = computed(() => {
@@ -247,6 +251,12 @@ const textbookPdfBookId = computed(() => {
 watch(selectedKnowledgeBase, (val) => {
   const chat = store.currentChat;
   if (chat) chat.knowledgeBase = val ?? '';
+});
+
+// 启用网络搜索与当前对话绑定：切换勾选时写入当前对话，切到别的界面再回来仍保留
+watch(enableWebSearch, (val) => {
+  const chat = store.currentChat;
+  if (chat) chat.enableWebSearch = Boolean(val);
 });
 
 function renderMarkdown(text) {
@@ -404,12 +414,14 @@ const createNewChat = async () => {
   if (userStore.isLoggedIn && store.defaultAgentId) {
     try {
       const thread = await threadApi.createThread(store.defaultAgentId, title);
+      // 新建对话一律使用默认值，不继承当前对话的知识库/网络搜索选择
       const newChat = {
         id: thread.id,
         title: thread.title || title,
         messages: [],
         threadId: thread.id,
-        knowledgeBase: selectedKnowledgeBase.value ?? ''
+        knowledgeBase: DEFAULT_KNOWLEDGE_BASE_ID,
+        enableWebSearch: false
       };
       store.chatList.push(newChat);
       switchChat(newChat.id);
@@ -425,12 +437,14 @@ const createNewChat = async () => {
 
 function createNewChatLocal(title) {
   const finalTitle = title || `对话 ${getNextConversationNumber()}`;
+  // 新建对话一律使用默认值，不继承当前对话的知识库/网络搜索选择
   const newChat = {
     id: Date.now().toString(),
     title: finalTitle,
     messages: [],
     threadId: null,
-    knowledgeBase: selectedKnowledgeBase.value ?? ''
+    knowledgeBase: DEFAULT_KNOWLEDGE_BASE_ID,
+    enableWebSearch: false
   };
   store.chatList.push(newChat);
   switchChat(newChat.id);
@@ -445,7 +459,9 @@ const switchChat = async (chatId) => {
   store.setCurrentChatId(chatId);
   store.setThreadId(chat.threadId ?? chat.id);
   inputMessage.value = '';
-  selectedKnowledgeBase.value = chat.knowledgeBase ?? '';
+  // 按该对话已保存的值恢复：知识库为「无」时 chat.knowledgeBase 为 ''，?? 不会替换成默认值
+  selectedKnowledgeBase.value = chat.knowledgeBase !== undefined && chat.knowledgeBase !== null ? chat.knowledgeBase : DEFAULT_KNOWLEDGE_BASE_ID;
+  enableWebSearch.value = Boolean(chat.enableWebSearch);
 
   if (userStore.isLoggedIn && store.defaultAgentId) {
     if (chat.messages.length === 0) await loadThreadHistory(chat);
@@ -639,7 +655,7 @@ const sendMessage = async () => {
           if (convStore.currentChatId === chatIdForThisRequest) nextTick(() => scrollToBottom());
         }
       },
-      { signal: controller.signal, enableWebSearch: enableWebSearch.value, knowledgeBase: store.currentChat?.knowledgeBase ?? selectedKnowledgeBase.value }
+      { signal: controller.signal, enableWebSearch: store.currentChat?.enableWebSearch ?? enableWebSearch.value, knowledgeBase: store.currentChat?.knowledgeBase ?? selectedKnowledgeBase.value }
     );
   } catch (error) {
     if (streamFlushTimer != null) {
@@ -698,12 +714,16 @@ onMounted(async () => {
 
   if (!userStore.isLoggedIn) {
     if (store.chatList.length === 0) createNewChat();
-    else selectedKnowledgeBase.value = store.currentChat?.knowledgeBase ?? '';
+    else {
+      selectedKnowledgeBase.value = store.currentChat?.knowledgeBase ?? DEFAULT_KNOWLEDGE_BASE_ID;
+      enableWebSearch.value = Boolean(store.currentChat?.enableWebSearch);
+    }
     return;
   }
 
   if (store.chatList.length > 0) {
-    selectedKnowledgeBase.value = store.currentChat?.knowledgeBase ?? '';
+    selectedKnowledgeBase.value = store.currentChat?.knowledgeBase ?? DEFAULT_KNOWLEDGE_BASE_ID;
+    enableWebSearch.value = Boolean(store.currentChat?.enableWebSearch);
     return;
   }
 
@@ -723,7 +743,8 @@ onMounted(async () => {
       title: t.title || `对话 ${t.id}`,
       messages: [],
       threadId: t.id,
-      knowledgeBase: ''
+      knowledgeBase: DEFAULT_KNOWLEDGE_BASE_ID,
+      enableWebSearch: false
     })));
 
     if (store.chatList.length > 0) {

@@ -14,12 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src import config as conf
 from src.agents import agent_manager
+from src import knowledge_base as kb_manager
 from sqlalchemy import func, select, update
 
 from src.agents.common import load_chat_model
 from src.services.chat_stream_service import stream_agent_chat
 from src.services.exercise_service import grade_answer, generate_question
-from src.services.textbook_service import get_textbook_chapters, retrieve_from_textbook
+from src.services.textbook_service import get_textbook_chapters
 from src.storage.postgres.models_business import (
     BookReadingPosition,
     ExerciseAttempt,
@@ -216,6 +217,64 @@ def list_course_knowledge_bases():
     return {"knowledge_bases": COURSE_KNOWLEDGE_BASES}
 
 
+async def _get_course_knowledge_context(query: str, kb_id: str, current_user) -> str:
+    """
+    根据课程知识库 id 从 Milvus 检索上下文。无回退：找不到对应库或调用失败即报错。
+    """
+    course_entry = next((c for c in COURSE_KNOWLEDGE_BASES if c.get("id") == kb_id), None)
+    display_name = course_entry.get("name", "") if course_entry else ""
+    if not display_name:
+        raise HTTPException(
+            status_code=400,
+            detail=f"未知的课程知识库 id: {kb_id!r}，请选择有效的课程知识库",
+        )
+
+    user_info = {"role": getattr(current_user, "role", None), "department_id": getattr(current_user, "department_id", None)}
+    result = await kb_manager.get_databases_by_user(user_info)
+    databases = result.get("databases") or []
+    milvus_db = next(
+        (d for d in databases if (d.get("name") == display_name and (d.get("kb_type") or "").lower() == "milvus")),
+        None,
+    )
+    if not milvus_db or not milvus_db.get("db_id"):
+        raise HTTPException(
+            status_code=503,
+            detail=f"课程知识库「{display_name}」对应的 Milvus 知识库未找到或不可用，请先在知识库管理中创建并导入课本（名称须为「{display_name}」、类型为 Milvus）",
+        )
+
+    try:
+        chunks = await kb_manager.aquery(
+            query,
+            milvus_db["db_id"],
+            final_top_k=8,
+        )
+    except Exception as e:
+        logger.exception("Milvus 课程知识库检索失败: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail=f"课程知识库检索失败（Milvus 调用异常）: {e!s}",
+        ) from e
+
+    if not chunks:
+        return ""
+    parts = []
+    total = 0
+    max_chars = 8000
+    for item in chunks:
+        content = (item.get("content") or "").strip()
+        if not content:
+            continue
+        source = (item.get("metadata") or {}).get("source", "")
+        block = f"【{source}】\n{content}\n" if source else f"{content}\n"
+        if total + len(block) > max_chars:
+            block = block[: max_chars - total]
+        parts.append(block)
+        total += len(block)
+        if total >= max_chars:
+            break
+    return "\n".join(parts).strip() if parts else ""
+
+
 @course.post("/chat/stream")
 async def course_chat_stream(
     request: CourseChatRequest,
@@ -242,7 +301,10 @@ async def course_chat_stream(
     # 仅当用户选择了课程知识库（非「无」）时才检索课本并注入；知识库选择无时不调用
     kb_id = (request.knowledge_base or "").strip()
     if kb_id:
-        context = retrieve_from_textbook(request.query, textbook_id=kb_id)
+        # 优先从 Milvus 知识库检索（按课程知识库名称解析 db_id）；若无则退回本地文件检索
+        context = await _get_course_knowledge_context(
+            request.query, kb_id, current_user
+        )
         if context:
             config["course_knowledge_context"] = context
     meta = request.meta or {}
@@ -417,6 +479,40 @@ def ocr_text_selection(body: OcrRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OCR 失败: {e!s}") from e
+
+
+# --- 课本伴读选区翻译（英译汉，不落库）---
+
+
+class TranslateRequest(BaseModel):
+    text: str
+
+
+@course.post("/translate")
+async def translate_text(
+    body: TranslateRequest,
+    current_user: User = Depends(get_required_user),
+):
+    """将选区文本翻译为中文（默认英译汉），不保存结果。"""
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    text = (body.text or "").strip()
+    if not text:
+        return {"success": True, "translated": ""}
+
+    prompt = "将以下英文翻译成中文。只输出译文，不要解释、不要序号、不要标题。若原文已是中文，则输出原文或简要说明。"
+    model = load_chat_model(conf.fast_model)
+    try:
+        msg_list = [
+            SystemMessage(content=prompt),
+            HumanMessage(content=text[:8000]),
+        ]
+        resp = await model.ainvoke(msg_list)
+        translated = (resp.content if hasattr(resp, "content") else str(resp)).strip()
+        return {"success": True, "translated": translated}
+    except Exception as e:
+        logger.warning("translate_text failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"翻译失败: {e!s}") from e
 
 
 # --- 课本伴读阅读进度（永久记录，需登录）---

@@ -267,7 +267,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { useUserStore } from '@/stores/user'
@@ -503,6 +503,30 @@ function openWrongModal() {
   wrongModalVisible.value = true
 }
 
+// 监听弹窗显隐：打开时主动拉取数据并绘图，避免依赖 afterOpenChange（部分环境下首次打开可能不触发）
+watch(wrongModalVisible, async (open) => {
+  if (open) {
+    wrongStatsLoadError.value = false
+    wrongListLoadError.value = false
+    wrongStatsErrorMessage.value = ''
+    wrongPage.value = 1
+    await loadWrongAnalysis()
+    await nextTick()
+    scheduleDrawWrongChart()
+  } else {
+    if (wrongChartRef.value) {
+      const chart = echarts.getInstanceByDom(wrongChartRef.value)
+      if (chart) chart.dispose()
+    }
+    wrongAnalysisLoading.value = false
+    wrongStatsLoadError.value = false
+    wrongListLoadError.value = false
+    wrongStatsErrorMessage.value = ''
+    wrongApiUserLogin.value = ''
+    wrongDebugTableTotal.value = null
+  }
+})
+
 async function onWrongModalOpen(open) {
   if (!open) {
     if (wrongChartRef.value) {
@@ -515,16 +539,8 @@ async function onWrongModalOpen(open) {
     wrongStatsErrorMessage.value = ''
     wrongApiUserLogin.value = ''
     wrongDebugTableTotal.value = null
-    return
   }
-  wrongStatsLoadError.value = false
-  wrongListLoadError.value = false
-  wrongStatsErrorMessage.value = ''
-  wrongPage.value = 1
-  await loadWrongAnalysis()
-  await nextTick()
-  // 弹窗打开后插槽可能尚未完成布局，延迟再绘图；drawWrongChart 内会在容器尺寸为 0 时自动重试
-  scheduleDrawWrongChart()
+  // 打开时不再在此拉取数据，已由 watch(wrongModalVisible) 在打开时统一处理
 }
 
 function scheduleDrawWrongChart() {

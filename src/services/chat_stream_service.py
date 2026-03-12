@@ -355,16 +355,22 @@ async def stream_agent_chat(
             "前端会自动将 **数字** 显示为「第N页」可点击链接。"
         )
         web_instruction = ""
+        source_format_instruction = ""
         if enable_web:
             web_instruction = (
-                "\n若本对话已开启网络搜索，请优先严格依据上述课本摘录作答，"
-                "必要时再使用网络搜索工具补充或核实最新信息，使课本与网络内容紧密配合。\n\n"
+                "\n本对话已开启网络搜索。请严格依据上述课本摘录作答，"
+                "并请在本轮回答中至少使用一次网络搜索工具以补充或核实信息，使课本与网络内容紧密配合。\n\n"
+            )
+            source_format_instruction = (
+                "列举知识点时只使用一行标题：「基于课本摘录和搜索结果，该问题涉及的知识点包括：」，"
+                "不要先写「基于课本摘录，该问题涉及的知识点包括：」再写「基于课本摘录和搜索结果…」。\n\n"
             )
         wrapped_content = (
             "以下是从《计算机网络：自顶向下方法》课本中检索到的相关内容，请严格基于课本摘录作答。\n\n"
             "重要说明：摘录中形如 **数字**（如 **327**）的是原书 PDF 页码。请你：\n"
             "1. 先简要列出该题涉及的知识点；\n"
             "2. 再给出对应课本页码。" + page_instruction + "\n\n"
+            + source_format_instruction
             + web_instruction
             + "【课本摘录】\n"
             f"{course_context.strip()}\n\n"
@@ -403,9 +409,24 @@ async def stream_agent_chat(
         logger.warning(f"No thread_id provided, generated new thread_id: {thread_id}")
 
     agent_config = (config_item.config_json or {}).get("context", {})
-    # 请求级覆盖：用户可选择本次对话是否启用网络搜索
+    # 请求级覆盖：确保本回合使用用户当前选择的联网搜索、知识库，避免中途切换后仍用旧配置
     if config.get("enable_web_search") is not None:
         agent_config = {**agent_config, "enable_web_search": bool(config["enable_web_search"])}
+    if "knowledges" in config:
+        agent_config = {**agent_config, "knowledges": config["knowledges"] if config["knowledges"] else []}
+
+    # 本回合若开启了联网搜索或知识库，注入明确指令，避免模型因上下文已有内容而不调用工具
+    tool_use_instruction = ""
+    if agent_config.get("enable_web_search") or (agent_config.get("knowledges") and len(agent_config.get("knowledges", [])) > 0):
+        parts = []
+        if agent_config.get("enable_web_search"):
+            parts.append("联网搜索")
+        if agent_config.get("knowledges") and len(agent_config["knowledges"]) > 0:
+            parts.append("知识库检索")
+        tool_use_instruction = (
+            f"本回合用户已开启「{'」与「'.join(parts)}」，请在本轮回答中主动使用相应工具获取信息，不要仅依赖对话上文作答。"
+        )
+
     input_context = {
         "user_id": user_id,
         "thread_id": thread_id,
@@ -413,6 +434,8 @@ async def stream_agent_chat(
         "agent_config_id": agent_config_id,
         "agent_config": agent_config,
     }
+    if tool_use_instruction:
+        input_context["tool_use_instruction"] = tool_use_instruction
 
     try:
         conv_repo = ConversationRepository(db)

@@ -127,17 +127,26 @@
             下一页 <RightOutlined />
           </button>
           <button 
-            @click="showChatPanel = !showChatPanel"
+            @click="toggleChatPanel"
             class="page-nav-btn chat-toggle-btn"
             :class="{ active: showChatPanel }"
             title="打开/关闭对话"
           >
             <CommentOutlined /> {{ showChatPanel ? '关闭对话' : '打开对话' }}
           </button>
+          <button 
+            v-if="selectedText && selectedText !== '正在识别...'"
+            @click="openTranslate"
+            class="page-nav-btn translate-toggle-btn"
+            :class="{ active: showTranslatePanel }"
+            title="翻译选中内容（英译汉）"
+          >
+            <TranslationOutlined /> {{ showTranslatePanel ? '关闭翻译' : '翻译' }}
+          </button>
         </div>
       </div>
 
-      <div class="reading-reader-wrapper" :class="{ 'with-chat': showChatPanel }">
+      <div class="reading-reader-wrapper" :class="{ 'with-chat': showChatPanel || showTranslatePanel }">
         <div class="reading-reader-content">
         <!-- PDF 页面显示区域 -->
         <div class="reading-pdf-page" 
@@ -181,6 +190,16 @@
                 type="button"
               >
                 <CommentOutlined /> 发送到对话
+              </button>
+              <button 
+                v-if="selectedText && selectedText !== '正在识别...'"
+                class="reading-action-btn reading-action-btn-translate"
+                @click.stop.prevent="openTranslate"
+                @mousedown.stop.prevent
+                @mouseup.stop.prevent
+                type="button"
+              >
+                <TranslationOutlined /> 翻译
               </button>
             </div>
           </div>
@@ -291,6 +310,27 @@
             </button>
           </div>
         </div>
+
+        <!-- 翻译面板（与对话面板互斥，关闭后不保留结果） -->
+        <div v-if="showTranslatePanel" class="reading-translate-panel">
+          <div class="reading-translate-header">
+            <h3 class="reading-translate-title">翻译（英译汉）</h3>
+            <button class="reading-translate-close" @click="closeTranslatePanel" title="关闭">
+              <CloseOutlined />
+            </button>
+          </div>
+          <div class="reading-translate-body">
+            <div v-if="translateSourceText" class="reading-translate-source">
+              <div class="reading-translate-label">原文</div>
+              <div class="reading-translate-text">{{ translateSourceText }}</div>
+            </div>
+            <div class="reading-translate-result-wrap">
+              <div class="reading-translate-label">译文</div>
+              <div v-if="isTranslateLoading" class="reading-translate-loading">翻译中…</div>
+              <div v-else class="reading-translate-text">{{ translateResult || '—' }}</div>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
   </div>
@@ -300,8 +340,8 @@
 import { ref, onMounted, computed, nextTick, h, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { marked } from 'marked';
-import { LeftOutlined, RightOutlined, ArrowLeftOutlined, CommentOutlined, CloseOutlined, DeleteOutlined } from '@ant-design/icons-vue';
-import { listBooks, getBookPages, getBookPageUrl, ocrTextSelection, courseChatStream, getReadingPosition as getReadingPositionApi, saveReadingPosition as saveReadingPositionApi } from '@/apis/courseApi.js';
+import { LeftOutlined, RightOutlined, ArrowLeftOutlined, CommentOutlined, CloseOutlined, DeleteOutlined, TranslationOutlined } from '@ant-design/icons-vue';
+import { listBooks, getBookPages, getBookPageUrl, ocrTextSelection, courseChatStream, translateText as translateTextApi, getReadingPosition as getReadingPositionApi, saveReadingPosition as saveReadingPositionApi } from '@/apis/courseApi.js';
 import { useUserStore } from '@/stores/user';
 import { agentApi, threadApi } from '@/apis/agent_api.js';
 
@@ -337,6 +377,11 @@ const isOcrProcessing = ref(false); // 防止重复 OCR 请求
 
 // 对话面板相关（按课本分离：每个 bookId 独立一份对话；当前展示用 chatMessages/chatThreadId 与当前课本同步）
 const showChatPanel = ref(false);
+/** 翻译面板（与对话面板互斥，只显示当前一次翻译结果，关闭即不保留） */
+const showTranslatePanel = ref(false);
+const translateSourceText = ref('');
+const translateResult = ref('');
+const isTranslateLoading = ref(false);
 /** bookId -> { messages: [], threadId: null }，用于切换课本时恢复 */
 const bookChats = ref({});
 
@@ -871,90 +916,79 @@ const clearSelection = () => {
   finalSelectionPosition.value = { left: 0, top: 0, width: 0, height: 0 };
 };
 
-// 发送到对话
+// 打开/关闭对话面板（与翻译面板互斥）
+const toggleChatPanel = () => {
+  if (showChatPanel.value) {
+    showChatPanel.value = false;
+  } else {
+    showTranslatePanel.value = false;
+    showChatPanel.value = true;
+  }
+};
+
+// 打开翻译面板并请求翻译（与对话面板互斥，结果不保留）
+const openTranslate = async () => {
+  const text = selectedText.value ? selectedText.value.trim() : '';
+  if (!text) return;
+  showChatPanel.value = false;
+  showTranslatePanel.value = true;
+  translateSourceText.value = text;
+  translateResult.value = '';
+  isTranslateLoading.value = true;
+  try {
+    const res = await translateTextApi(text);
+    translateResult.value = (res && res.translated != null) ? String(res.translated) : '';
+  } catch (_) {
+    translateResult.value = '翻译失败，请重试';
+  } finally {
+    isTranslateLoading.value = false;
+  }
+};
+
+// 关闭翻译面板（不保留本次翻译结果）
+const closeTranslatePanel = () => {
+  showTranslatePanel.value = false;
+  translateSourceText.value = '';
+  translateResult.value = '';
+};
+
+// 发送到对话：仅填入输入框并追加提示语，由用户自行点击发送
 const sendToConversation = async (e) => {
-  // 阻止事件冒泡和默认行为
   if (e) {
     e.preventDefault();
     e.stopPropagation();
   }
-  
-  console.log('=== sendToConversation 被调用 ===');
-  console.log('selectedText.value:', selectedText.value);
-  console.log('showChatPanel.value (调用前):', showChatPanel.value);
-  
+
   const textToSend = selectedText.value ? selectedText.value.trim() : '';
-  
   if (!textToSend) {
-    console.warn('selectedText 为空，无法发送到对话');
     alert('请先选择要发送的文本');
     return;
   }
-  
-  console.log('准备发送的文本:', textToSend);
-  
-  // 打开对话面板
+
+  const suffix = '请解释以上计算机网络相关知识';
+  const contentToFill = textToSend + '\n\n' + suffix;
+
+  showTranslatePanel.value = false;
   showChatPanel.value = true;
-  console.log('showChatPanel.value (设置后):', showChatPanel.value);
-  
-  // 等待面板完全渲染
+
   await nextTick();
   await nextTick();
-  
-  // 设置输入框的值 - 使用多种方式确保更新
-  chatInputMessage.value = textToSend;
-  console.log('chatInputMessage.value 已设置:', chatInputMessage.value);
-  
-  // 如果 textarea ref 存在，也直接设置其值（双重保险）
-  await nextTick(); // 再等待一个 tick 确保 ref 已更新
+
+  chatInputMessage.value = contentToFill;
+  await nextTick();
   if (chatTextarea.value) {
-    chatTextarea.value.value = textToSend;
-    // 触发 input 事件确保 v-model 更新
+    chatTextarea.value.value = contentToFill;
     chatTextarea.value.dispatchEvent(new Event('input', { bubbles: true }));
-    console.log('textarea.value 已直接设置:', chatTextarea.value.value);
   } else {
-    console.warn('chatTextarea.value 不存在，等待更长时间...');
-    // 如果 ref 还不存在，再等待一下
     setTimeout(() => {
       if (chatTextarea.value) {
-        chatTextarea.value.value = textToSend;
+        chatTextarea.value.value = contentToFill;
         chatTextarea.value.dispatchEvent(new Event('input', { bubbles: true }));
-        console.log('延迟设置 textarea.value:', chatTextarea.value.value);
       }
     }, 100);
   }
-  
-  console.log('已将文本填充到输入框:', chatInputMessage.value, 'textarea.value:', chatTextarea.value?.value);
-  
-  // 等待一下确保输入框已更新，然后自动发送
-  setTimeout(() => {
-    const finalValue = chatInputMessage.value || chatTextarea.value?.value || '';
-    console.log('准备自动发送消息, 最终值:', finalValue);
-    
-    // 如果 v-model 没有更新，手动设置
-    if (!chatInputMessage.value && finalValue) {
-      chatInputMessage.value = finalValue;
-    }
-    
-    // 检查输入框是否有值
-    if (chatInputMessage.value && chatInputMessage.value.trim()) {
-      console.log('调用 sendChatMessage，内容:', chatInputMessage.value);
-      sendChatMessage();
-    } else {
-      console.warn('输入框值为空，无法发送。尝试直接使用 textToSend');
-      // 如果还是为空，直接使用原始值发送
-      if (textToSend) {
-        chatInputMessage.value = textToSend;
-        console.log('使用 textToSend 直接设置并发送:', textToSend);
-        sendChatMessage();
-      } else {
-        console.error('所有尝试都失败，无法发送消息');
-      }
-    }
-    
-    // 自动清除选择框
-    clearSelection();
-  }, 500); // 增加延迟时间到 500ms
+  adjustTextareaHeight();
+  clearSelection();
 };
 
 // 清除当前课本的对话上下文（下次提问将使用新 thread）
@@ -1470,6 +1504,18 @@ onMounted(async () => {
   background-color: #e07300;
 }
 
+.translate-toggle-btn {
+  background-color: var(--gray-600);
+}
+
+.translate-toggle-btn:hover:not(:disabled) {
+  background-color: var(--gray-500);
+}
+
+.translate-toggle-btn.active {
+  background-color: var(--dark-text);
+}
+
 .reading-page-info {
   font-size: 14px;
   color: var(--gray-600);
@@ -1546,7 +1592,8 @@ onMounted(async () => {
   min-width: 400px;
 }
 
-.reading-reader-wrapper.with-chat .reading-chat-panel {
+.reading-reader-wrapper.with-chat .reading-chat-panel,
+.reading-reader-wrapper.with-chat .reading-translate-panel {
   flex: 0 0 400px;
   margin-left: auto;
 }
@@ -1635,6 +1682,87 @@ onMounted(async () => {
 
 .reading-action-btn:hover {
   background-color: #153e68;
+}
+
+.reading-action-btn-translate {
+  background-color: var(--secondary-color);
+}
+
+.reading-action-btn-translate:hover {
+  background-color: #e07300;
+}
+
+/* 翻译面板样式（与对话面板同槽位，互斥显示） */
+.reading-translate-panel {
+  width: 400px;
+  background-color: var(--white);
+  border-radius: 8px;
+  box-shadow: var(--shadow-light);
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 200px);
+  min-height: 600px;
+  position: sticky;
+  top: 24px;
+}
+
+.reading-translate-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.reading-translate-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--primary-color);
+  margin: 0;
+}
+
+.reading-translate-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--gray-500);
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.3s ease;
+}
+
+.reading-translate-close:hover {
+  color: var(--primary-color);
+}
+
+.reading-translate-body {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.reading-translate-label {
+  font-size: 12px;
+  color: var(--gray-500);
+  margin-bottom: 6px;
+}
+
+.reading-translate-source .reading-translate-text,
+.reading-translate-result-wrap .reading-translate-text {
+  color: var(--dark-text);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.reading-translate-loading {
+  color: var(--gray-500);
+  font-style: italic;
 }
 
 .reading-action-btn:last-child {

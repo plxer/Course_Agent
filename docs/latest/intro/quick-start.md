@@ -81,10 +81,10 @@ docker compose up --build -d
 
 **注意**：启动后，可能还需要一些时间，尤其是后端服务需要一段时间，请耐心等待 2-3 分钟。
 
-默认启动**不包含 Milvus**（仅使用 Chroma / LightRAG 等类型知识库时无需 Milvus）。若需使用 **Milvus** 或 **LightRAG** 类型知识库，请带 profile 启动：
+默认启动**已包含 Milvus**（etcd、minio、milvus 会一并启动）。若不需要 Milvus，可仅启动其他服务，例如：
 
 ```bash
-docker compose --profile milvus up -d
+docker compose up -d postgres graph api web minio
 ```
 
 #### 4. 访问系统
@@ -188,16 +188,14 @@ $env:HTTPS_PROXY="http://IP:PORT"
 </details>
 
 <details>
-<summary><strong>Milvus 启动失败 / 需要启用 Milvus</strong></summary>
+<summary><strong>Milvus 启动失败 / 不启用 Milvus</strong></summary>
 
-Milvus 为可选服务，仅在使用 **Milvus** 或 **LightRAG** 类型知识库时需要。默认 `docker compose up -d` 不会启动 Milvus。
+Milvus 默认随 `docker compose up -d` 一并启动。若 Milvus 启动失败，可查看 `docker logs milvus` 排查。
 
-如需启动 Milvus：
+若不需要 Milvus，可只启动其他服务（不启动 etcd、milvus）：
 
 ```bash
-docker compose --profile milvus up -d
-# 若已有其他服务在运行，仅启动 Milvus 及其依赖（etcd）
-docker compose --profile milvus up milvus -d
+docker compose up -d postgres graph minio api web
 ```
 
 </details>

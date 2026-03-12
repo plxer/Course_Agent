@@ -43,6 +43,13 @@ def validate_file_path(file_path: str, db_id: str = None) -> str:
             os.path.abspath(os.path.realpath(config.save_dir)),
         ]
 
+        # 允许 knowledgebase 目录（用于课程课本等预置文档导入）
+        try:
+            kb_dir = os.environ.get("KNOWLEDGEBASE_DIR", "knowledgebase")
+            allowed_dirs.append(os.path.abspath(os.path.realpath(kb_dir)))
+        except Exception:
+            pass
+
         # 如果指定了db_id，添加知识库特定的上传目录
         if db_id:
             try:

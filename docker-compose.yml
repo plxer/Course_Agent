@@ -56,6 +56,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      milvus:
+        condition: service_healthy
       graph:
         condition: service_healthy
 
@@ -112,8 +114,6 @@ services:
 
   etcd:
     container_name: milvus-etcd-dev
-    profiles:
-      - milvus
     image: quay.io/coreos/etcd:v3.5.5
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
@@ -157,11 +157,9 @@ services:
     restart: unless-stopped
 
   milvus:
-    profiles:
-      - milvus
     image: milvusdb/milvus:v2.5.6
     container_name: milvus
-    command: ["milvus", "run", "standalone"]
+    command: ["sh", "-c", "milvus run standalone >/dev/null 2>&1"]
     security_opt:
       - seccomp:unconfined
     environment:
@@ -171,6 +169,8 @@ services:
     volumes:
       - ./docker/volumes/milvus/milvus:/var/lib/milvus
       - ./docker/volumes/milvus/logs:/var/lib/milvus/logs
+    logging:
+      driver: none
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
       interval: 60s

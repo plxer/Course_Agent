@@ -104,8 +104,12 @@ class RuntimeConfigMiddleware(AgentMiddleware):
         if self.enable_system_prompt_override:
             cur_datetime = f"当前时间：{shanghai_now().strftime('%Y-%m-%d %H:%M:%S')} UTC"
             system_prompt = getattr(runtime_context, self.system_prompt_context_name, "") or ""
+            extra = f"{cur_datetime}\n\n{system_prompt}"
+            tool_use_instruction = getattr(runtime_context, "tool_use_instruction", "") or ""
+            if tool_use_instruction and isinstance(tool_use_instruction, str):
+                extra = f"{extra}\n\n{tool_use_instruction}"
             new_content = list(request.system_message.content_blocks) + [
-                {"type": "text", "text": f"{cur_datetime}\n\n{system_prompt}"}
+                {"type": "text", "text": extra}
             ]
             new_system_message = SystemMessage(content=new_content)
             overrides["system_message"] = new_system_message

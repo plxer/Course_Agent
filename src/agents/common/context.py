@@ -99,6 +99,12 @@ class BaseContext:
         },
     )
 
+    # 运行时注入：本回合是否强制要求使用工具（由 chat_stream_service 按请求设置，不持久化）
+    tool_use_instruction: str = field(
+        default="",
+        metadata={"configurable": False, "hide": True},
+    )
+
     @classmethod
     def from_file(cls, module_name: str, input_context: dict = None) -> "BaseContext":
         """Load configuration from a YAML file. 用于持久化配置"""
