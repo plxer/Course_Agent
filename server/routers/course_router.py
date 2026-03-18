@@ -4,6 +4,7 @@ import os
 import re
 import json
 import uuid
+import random
 from pathlib import Path
 
 import fitz
@@ -61,11 +62,33 @@ def _list_pdf_books() -> list[dict]:
     books = _books_dir()
     if not books.is_dir():
         return []
-    out = []
-    for f in sorted(books.glob("*.pdf")):
+    # 按文件名排序后的前两个视为“课本”（第 1 本指定课本，第 2 本拓展阅读），其余为“讲义”
+    # 注意：分类规则依赖排序结果，不在这里根据文件内容识别。
+    out: list[dict] = []
+    sorted_pdfs = sorted(books.glob("*.pdf"))
+    for idx, f in enumerate(sorted_pdfs):
         try:
             stat = f.stat()
-            out.append({"id": f.stem, "name": f.name, "size": stat.st_size})
+            if idx == 0:
+                book_type = "course_textbook"
+                book_label = "指定课本"
+            elif idx == 1:
+                book_type = "supplement"
+                book_label = "拓展阅读"
+            else:
+                book_type = "handout"
+                book_label = "讲义"
+
+            out.append(
+                {
+                    "id": f.stem,
+                    "name": f.name,
+                    "size": stat.st_size,
+                    "book_type": book_type,
+                    "book_label": book_label,
+                    "sort_order": idx,
+                }
+            )
         except OSError:
             continue
     return out
@@ -275,6 +298,39 @@ async def _get_course_knowledge_context(query: str, kb_id: str, current_user) ->
     return "\n".join(parts).strip() if parts else ""
 
 
+async def _is_query_related_to_computer_networking(query: str) -> bool:
+    """
+    判断用户问题是否与《计算机网络》课程相关。不相关则返回 False，便于尽早拒绝以节省 token。
+    调用异常或超时时视为相关，避免误拦。
+    """
+    query = (query or "").strip()[:500]
+    if not query:
+        return False
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    prompt = (
+        "你是一个判断题助手。仅根据用户的问题判断：该问题是否与《计算机网络》课程内容相关？\n"
+        "相关包括：网络协议、TCP/IP、HTTP、DNS、路由、交换机、网络安全、拥塞控制、Socket 等课本概念与习题。\n"
+        "不相关包括：与网络无关的数学、编程、其他课程、生活闲聊等。\n"
+        "只回答一个词：YES 或 NO。"
+    )
+    try:
+        model = load_chat_model(conf.fast_model)
+        msg_list = [
+            SystemMessage(content=prompt),
+            HumanMessage(content=query),
+        ]
+        resp = await model.ainvoke(msg_list)
+        text = (resp.content if hasattr(resp, "content") else str(resp)).strip().upper()
+        # 仅当明确回答 NO 时判为不相关
+        if text.startswith("NO") or text == "NO":
+            return False
+        return True
+    except Exception as e:
+        logger.warning("课程问题相关性检测失败，视为相关: %s", e)
+        return True
+
+
 @course.post("/chat/stream")
 async def course_chat_stream(
     request: CourseChatRequest,
@@ -282,6 +338,22 @@ async def course_chat_stream(
     db: AsyncSession = Depends(get_db),
 ):
     """课程对话流式接口：使用默认智能体，课本伴读侧边栏对话会调用此接口。"""
+    # 本平台课程对话必须选择课程知识库（当前仅支持「计算机网络」），不可选择「无」
+    kb_id = (request.knowledge_base or "").strip()
+    valid_ids = [c.get("id") for c in COURSE_KNOWLEDGE_BASES if c.get("id")]
+    if not kb_id or kb_id not in valid_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="本平台课程对话必须选择「计算机网络」知识库，不可选择「无」。请在上方选择「计算机网络」后再提问。",
+        )
+
+    # 先检测问题是否与计算机网络相关，完全不相关则立即停止并提示，减少 token 浪费
+    if not await _is_query_related_to_computer_networking(request.query):
+        raise HTTPException(
+            status_code=400,
+            detail="您的问题与《计算机网络》课程内容无关。为节省资源，请仅在此处询问与计算机网络相关的问题（如协议、TCP/IP、HTTP、DNS、路由、网络安全等）。",
+        )
+
     # 课程对话优先使用环境变量 DEFAULT_AGENT_ID，否则 config，否则固定 ChatbotAgent（不依赖 agents 顺序）
     agent_id = (os.getenv("DEFAULT_AGENT_ID") or "").strip() or conf.default_agent_id or "ChatbotAgent"
     agents = await agent_manager.get_agents_info()
@@ -298,15 +370,12 @@ async def course_chat_stream(
     config = {"thread_id": thread_id}
     if request.enable_web_search is not None:
         config["enable_web_search"] = request.enable_web_search
-    # 仅当用户选择了课程知识库（非「无」）时才检索课本并注入；知识库选择无时不调用
-    kb_id = (request.knowledge_base or "").strip()
-    if kb_id:
-        # 优先从 Milvus 知识库检索（按课程知识库名称解析 db_id）；若无则退回本地文件检索
-        context = await _get_course_knowledge_context(
-            request.query, kb_id, current_user
-        )
-        if context:
-            config["course_knowledge_context"] = context
+    # 已校验 kb_id 必选，检索课本并注入
+    context = await _get_course_knowledge_context(
+        request.query, kb_id, current_user
+    )
+    if context:
+        config["course_knowledge_context"] = context
     meta = request.meta or {}
     if "request_id" not in meta or not meta.get("request_id"):
         meta["request_id"] = str(uuid.uuid4())
@@ -610,6 +679,84 @@ async def exercises_generate(
         return out
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+class ExerciseQuizGenerateRequest(BaseModel):
+    chapter: int  # 章号 1–8
+    question_type_counts: dict[str, int]  # {"choice": 2, "fill": 3, ...}
+    knowledge_point_ids: list[str] = []  # 空表示使用该章节全部知识点
+
+
+@course.post("/exercises/generate-quiz")
+async def exercises_generate_quiz(
+    body: ExerciseQuizGenerateRequest,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """生成小测：一次生成多题（多种题型 + 数量）。知识点支持可选集合；未选时默认个性化抽取。"""
+
+    allowed_types = {"choice", "fill", "short_answer"}
+    question_sequence: list[str] = []
+    for q_type, count in (body.question_type_counts or {}).items():
+        if q_type not in allowed_types:
+            raise HTTPException(status_code=400, detail=f"不支持的题型：{q_type}")
+        n = int(count or 0)
+        if n <= 0:
+            continue
+        question_sequence.extend([q_type] * n)
+
+    if not question_sequence:
+        raise HTTPException(status_code=400, detail="question_type_counts 总数量必须大于 0")
+
+    chapters = get_textbook_chapters()
+    chapter_obj = next((c for c in chapters if int(c.get("id")) == int(body.chapter)), None)
+    if not chapter_obj:
+        raise HTTPException(status_code=400, detail="章节不存在")
+
+    all_kps = chapter_obj.get("knowledge_points") or []
+    selected_ids = (body.knowledge_point_ids or [])[:]
+    if selected_ids:
+        id_set = {str(x) for x in selected_ids}
+        eligible_kps = [kp for kp in all_kps if str(kp.get("id")) in id_set]
+    else:
+        eligible_kps = all_kps
+
+    if not eligible_kps:
+        raise HTTPException(status_code=400, detail="未找到可用知识点")
+
+    eligible_titles = [str(kp.get("title") or "") for kp in eligible_kps]
+
+    # 个性化：权重 = 错题次数 + 1（保证未出现过的知识点仍有非零概率）
+    q_wrong = (
+        select(ExerciseAttempt.knowledge_point, func.count(ExerciseAttempt.id).label("count"))
+        .where(
+            ExerciseAttempt.user_id == current_user.id,
+            ExerciseAttempt.is_correct == 0,
+            ExerciseAttempt.chapter == str(body.chapter),
+            ExerciseAttempt.knowledge_point.in_(eligible_titles),
+        )
+        .group_by(ExerciseAttempt.knowledge_point)
+    )
+    result = await db.execute(q_wrong)
+    wrong_rows = result.all()
+    wrong_cnt_by_title: dict[str, int] = {str(r[0] or "").strip() or "未分类": int(r[1] or 0) for r in wrong_rows}
+
+    weights = [wrong_cnt_by_title.get(str(kp.get("title") or "").strip() or "未分类", 0) + 1 for kp in eligible_kps]
+
+    questions: list[dict] = []
+    for q_type in question_sequence:
+        kp = random.choices(eligible_kps, weights=weights, k=1)[0]
+        out = await generate_question(
+            q_type,
+            kp.get("title") or "",
+            chapter=body.chapter,
+            section_id=kp.get("section_id"),
+        )
+        out["knowledge_point_id"] = kp.get("id")
+        out["knowledge_point"] = kp.get("title") or ""
+        questions.append(out)
+
+    return {"questions": questions}
 
 
 class ExerciseSubmitRequest(BaseModel):

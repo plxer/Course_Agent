@@ -48,33 +48,96 @@
 
       <!-- 课本列表 -->
       <div class="reading-list-section">
-        <h2 class="reading-list-title">可用课本</h2>
-        
-        <div class="reading-list" v-if="books.length > 0">
-          <div 
-            v-for="book in books" 
-            :key="book.id" 
-            class="reading-card" 
-            @click="selectBook(book)"
-          >
-            <div class="reading-card-header">
-              <div class="reading-card-tags">
-                <span class="reading-card-tag">PDF</span>
+        <h2 class="reading-list-title">课本</h2>
+
+        <template v-if="books.length > 0">
+          <section v-if="courseTextbooks.length" class="reading-subsection">
+            <h3 class="reading-subsection-title reading-subsection-title--secondary">指定课本</h3>
+            <div class="reading-list">
+              <div
+                v-for="book in courseTextbooks"
+                :key="book.id"
+                class="reading-card"
+                @click="selectBook(book)"
+              >
+                <div class="reading-card-header">
+                  <div class="reading-card-tags">
+                    <span class="reading-card-tag">{{ book.book_label || '指定课本' }}</span>
+                    <span class="reading-card-tag">PDF</span>
+                  </div>
+                </div>
+                <h3 class="reading-card-title">{{ book.name }}</h3>
+                <div class="reading-card-footer">
+                  <div class="reading-card-info">
+                    <span class="reading-card-page">{{ formatFileSize(book.size) }}</span>
+                  </div>
+                  <a href="#" class="reading-card-action" @click.prevent="selectBook(book)">
+                    开始阅读 <RightOutlined style="margin-left: 4px;" />
+                  </a>
+                </div>
               </div>
             </div>
-            <h3 class="reading-card-title">{{ book.name }}</h3>
-            <div class="reading-card-footer">
-              <div class="reading-card-info">
-                <span class="reading-card-page">{{ formatFileSize(book.size) }}</span>
+          </section>
+
+          <section v-if="supplementBooks.length" class="reading-subsection">
+            <h3 class="reading-subsection-title reading-subsection-title--secondary">拓展阅读</h3>
+            <div class="reading-list">
+              <div
+                v-for="book in supplementBooks"
+                :key="book.id"
+                class="reading-card"
+                @click="selectBook(book)"
+              >
+                <div class="reading-card-header">
+                  <div class="reading-card-tags">
+                    <span class="reading-card-tag">{{ book.book_label || '拓展阅读' }}</span>
+                    <span class="reading-card-tag">PDF</span>
+                  </div>
+                </div>
+                <h3 class="reading-card-title">{{ book.name }}</h3>
+                <div class="reading-card-footer">
+                  <div class="reading-card-info">
+                    <span class="reading-card-page">{{ formatFileSize(book.size) }}</span>
+                  </div>
+                  <a href="#" class="reading-card-action" @click.prevent="selectBook(book)">
+                    开始阅读 <RightOutlined style="margin-left: 4px;" />
+                  </a>
+                </div>
               </div>
-              <a href="#" class="reading-card-action" @click.prevent="selectBook(book)">
-                开始阅读 <RightOutlined style="margin-left: 4px;" />
-              </a>
             </div>
-          </div>
-        </div>
+          </section>
+
+          <section v-if="handoutBooks.length" class="reading-subsection">
+            <h3 class="reading-subsection-title">讲义</h3>
+            <div class="reading-list">
+              <div
+                v-for="book in handoutBooks"
+                :key="book.id"
+                class="reading-card"
+                @click="selectBook(book)"
+              >
+                <div class="reading-card-header">
+                  <div class="reading-card-tags">
+                    <span class="reading-card-tag">{{ book.book_label || '讲义' }}</span>
+                    <span class="reading-card-tag">PDF</span>
+                  </div>
+                </div>
+                <h3 class="reading-card-title">{{ book.name }}</h3>
+                <div class="reading-card-footer">
+                  <div class="reading-card-info">
+                    <span class="reading-card-page">{{ formatFileSize(book.size) }}</span>
+                  </div>
+                  <a href="#" class="reading-card-action" @click.prevent="selectBook(book)">
+                    开始阅读 <RightOutlined style="margin-left: 4px;" />
+                  </a>
+                </div>
+              </div>
+            </div>
+          </section>
+        </template>
+
         <div v-else class="reading-empty">
-          <p>暂无可用课本，请将 PDF 文件放入 knowledgebase/books 文件夹</p>
+          <p>暂无课本，请将 PDF 文件放入 knowledgebase/books 文件夹</p>
         </div>
       </div>
     </main>
@@ -85,7 +148,7 @@
         <button class="reading-back-btn" @click="selectedBook = null; syncReaderToQuery()">
           <ArrowLeftOutlined /> 返回
         </button>
-        <h2 class="reading-reader-title">{{ selectedBook.name }}</h2>
+        <h2 class="reading-reader-title">{{ selectedBook.name }} · {{ selectedBook.book_label || '课本' }}</h2>
         <div class="reading-page-controls">
           <button 
             @click="goToPage(currentPage - 1)" 
@@ -232,7 +295,7 @@
                 <svg class="reading-avatar-robot" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h2v1h2v2h2v2h1c.55 0 1 .45 1 1v2h1v2h-1v2H4v-2H3v-2h1v-2c0-.55.45-1 1-1h1v-2h2V8h2V7h2V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M8 18h8v-2H8v2m-1-5h2v2H7v-2m8 0v2h-2v-2h2m-3-3h2v2h-2v-2m-4 0v2H7v-2h2z"/></svg>
               </div>
               <div class="reading-chat-content ai">
-                <div class="reading-chat-text">你好！我是课程智能体，很高兴为你解答学习中的问题。你可以选择文本后发送到对话，或直接输入问题。</div>
+                <div class="reading-chat-text">你好！我是课程智能体，很高兴为你解答《计算机网络》学习中的问题。你可以选择文本后发送到对话，或直接输入问题。</div>
               </div>
             </div>
 
@@ -286,7 +349,7 @@
               ref="chatTextarea"
               v-model="chatInputMessage" 
               class="reading-chat-textarea" 
-              placeholder="请输入你的问题..."
+              placeholder="本平台仅支持计算机网络相关知识点提问（如协议、TCP/IP、HTTP、DNS、路由、网络安全等），与课程无关的问题将无法解答。"
               @input="adjustTextareaHeight"
               @keydown.enter.exact.prevent="sendChatMessage"
               @keydown.enter.shift.exact="handleShiftEnter"
@@ -357,6 +420,10 @@ function renderMarkdown(text) {
 }
 
 const books = ref([]);
+// 分类：第 1 本指定课本；第 2 本拓展阅读；其余为讲义
+const courseTextbooks = computed(() => books.value.filter((b) => b.book_type === 'course_textbook'));
+const supplementBooks = computed(() => books.value.filter((b) => b.book_type === 'supplement'));
+const handoutBooks = computed(() => books.value.filter((b) => b.book_type === 'handout'));
 const selectedBook = ref(null);
 const currentPage = ref(1);
 const totalPages = ref(0);
@@ -1072,7 +1139,16 @@ const sendChatMessage = async () => {
         scrollChatToBottom();
       }
     },
-    { signal: chatStreamController.value.signal, meta: { source: 'reading', book_id: book.id } }
+    {
+      signal: chatStreamController.value.signal,
+      meta: {
+        source: 'reading',
+        book_id: book.id,
+        book_type: book.book_type,
+        book_label: book.book_label
+      },
+      knowledgeBase: 'computer_networking'
+    }
     );
   } catch (error) {
     if (error.name === 'AbortError') {
@@ -1329,6 +1405,25 @@ onMounted(async () => {
   font-weight: 600;
   color: var(--primary-color);
   margin-bottom: 24px;
+}
+
+.reading-subsection {
+  margin-bottom: 32px;
+}
+
+.reading-subsection:last-child {
+  margin-bottom: 0;
+}
+
+.reading-subsection-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--primary-color);
+  margin: 0 0 16px 0;
+}
+
+.reading-subsection-title--secondary {
+  font-size: 16px;
 }
 
 .reading-list {

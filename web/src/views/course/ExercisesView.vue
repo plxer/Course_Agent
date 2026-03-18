@@ -38,23 +38,37 @@
     <main class="exercises-main">
       <div class="exercises-title-section">
         <h1 class="exercises-title">习题推荐</h1>
-        <p class="exercises-subtitle">选择题型与知识点，智能体出题；答对积 1 分，可到积分商城兑换称号</p>
+        <p class="exercises-subtitle">选择章节与题型数量，一次生成小测；默认按错题情况个性化抽取知识点</p>
       </div>
 
       <!-- 题型 + 知识点选择 -->
       <section class="exercises-select-section">
         <h2 class="exercises-section-title">选择题型</h2>
         <div class="exercises-type-row">
-          <button
+          <div
             v-for="t in questionTypes"
             :key="t.value"
-            type="button"
-            class="exercises-type-btn"
-            :style="selectedType === t.value ? selectedBtnStyle : undefined"
-            @click="selectedType = t.value"
+            class="exercises-type-option"
+            :class="{ 'exercises-type-option--selected': questionTypeCounts[t.value] > 0 }"
           >
-            {{ t.label }}
-          </button>
+            <label class="exercises-type-option-check">
+              <input
+                type="checkbox"
+                :checked="questionTypeCounts[t.value] > 0"
+                @change="toggleQuestionType(t.value)"
+              />
+              <span class="exercises-type-option-label">{{ t.label }}</span>
+            </label>
+            <input
+              class="exercises-type-qty-input"
+              type="number"
+              min="1"
+              step="1"
+              :disabled="questionTypeCounts[t.value] === 0"
+              v-model.number="questionTypeCounts[t.value]"
+              @change="onQuestionTypeQtyChange(t.value)"
+            />
+          </div>
         </div>
 
         <h2 class="exercises-section-title">选择章节</h2>
@@ -76,15 +90,15 @@
           </button>
         </div>
 
-        <h2 v-if="selectedChapter" class="exercises-section-title">选择知识点</h2>
+        <h2 v-if="selectedChapter" class="exercises-section-title">选择知识点(可多选)</h2>
         <div v-if="selectedChapter" class="exercises-knowledge-grid">
           <button
             v-for="kp in selectedChapter.knowledge_points"
             :key="kp.id"
             type="button"
             class="exercises-knowledge-btn"
-            :style="isKnowledgePointSelected(kp.id) ? selectedBtnStyle : undefined"
-            @click="selectedKnowledgePointId = kp.id"
+          :style="isKnowledgePointSelected(kp.id) ? selectedBtnStyle : undefined"
+          @click="toggleKnowledgePoint(kp.id)"
           >
             {{ kp.title }}
           </button>
@@ -95,12 +109,23 @@
             type="button"
             class="exercises-generate-btn"
             :style="primaryBtnStyle"
-            :disabled="!selectedType || !selectedChapter || !selectedKnowledgePoint || generating"
+          :disabled="!selectedChapter || totalQuestionCount <= 0 || generating"
             @click="doGenerate"
           >
             {{ generating ? '生成中…' : '生成题目' }}
           </button>
+        <button
+          type="button"
+          class="exercises-clear-quiz-btn"
+          :disabled="!quizQuestions.length || generating"
+          @click="clearQuiz"
+        >
+          清除本次小测
+        </button>
         </div>
+      <p v-if="totalQuestionCount > 10" class="exercises-quiz-limit-hint">
+        本次小测最多 10 道题（将自动截断生成到 10 道）
+      </p>
       </section>
 
       <!-- 题目与作答 -->
@@ -168,12 +193,27 @@
                 v-html="renderTextbookMarkdown(resultExplanation)"
               />
             </div>
-            <button type="button" class="exercises-next-btn" @click="resetQuestion">再做一题</button>
+            <div class="exercises-quiz-actions">
+              <button
+                v-if="currentQuestionIndex > 0"
+                type="button"
+                class="exercises-prev-btn"
+                @click="goPrevQuestion"
+              >
+                上一题
+              </button>
+              <button type="button" class="exercises-next-btn" @click="goNextQuestion">
+                {{ currentQuestionIndex + 1 >= quizQuestions.length ? '完成小测' : '下一题' }}
+              </button>
+            </div>
           </div>
         </div>
       </section>
+      <section v-else-if="quizFinished" class="exercises-empty-hint">
+        本次小测已完成。你可以修改题型数量/知识点集合后再次点击「生成题目」。
+      </section>
       <section v-else class="exercises-empty-hint">
-        请先选择题型、章节与知识点，再点击「生成题目」开始练习。
+        请先选择题型数量与章节，再点击「生成题目」开始练习（知识点可选）。
       </section>
     </main>
 
@@ -241,15 +281,17 @@
           </div>
           <div v-else class="wrong-list-items">
             <div v-for="item in wrongList" :key="item.id" class="wrong-list-item">
-              <p class="wrong-item-question">{{ item.question_content }}</p>
+              <div class="wrong-item-question wrong-item-markdown" v-html="renderTextbookMarkdown(item.question_content || '')"></div>
               <p class="wrong-item-meta">
             {{ item.question_type === 'choice' ? '选择题' : item.question_type === 'fill' ? '填空题' : '简答题' }}
             · 知识点：{{ item.knowledge_point }}
             {{ item.section_title ? ` · ${item.section_title}` : '' }}
-            · 你的答案：{{ item.user_answer }}
           </p>
-              <p v-if="item.correct_answer" class="wrong-item-correct">正确答案：{{ item.correct_answer }}</p>
-              <p v-if="item.explanation" class="wrong-item-explanation">{{ item.explanation }}</p>
+              <div v-if="item.user_answer" class="wrong-item-answer">
+                <strong>你的答案：</strong>
+                <div class="wrong-item-markdown" v-html="renderTextbookMarkdown(item.user_answer)"></div>
+              </div>
+              <div v-if="item.explanation" class="wrong-item-explanation wrong-item-markdown" v-html="renderTextbookMarkdown(item.explanation)"></div>
             </div>
           </div>
           <a-pagination
@@ -275,7 +317,7 @@ import { marked } from 'marked'
 import * as echarts from 'echarts'
 import {
   getTextbookChapters,
-  exerciseGenerate,
+  exerciseQuizGenerate,
   exerciseSubmit,
   exerciseWrongAnalysis,
   exerciseWrongList,
@@ -300,17 +342,20 @@ const questionTypes = [
 const chapters = ref([])
 const chaptersLoading = ref(true)
 const chaptersError = ref('')
-const selectedType = ref('')
 const selectedChapterId = ref(null)
-const selectedKnowledgePointId = ref(null)
+const selectedKnowledgePointIds = ref([])
+const quizQuestions = ref([])
+const quizSubmissions = ref([]) // 每题是否已提交 + 判题结果，用于支持返回上一题
+const currentQuestionIndex = ref(0)
+const quizFinished = ref(false)
+const questionTypeCounts = ref({
+  choice: 0,
+  fill: 0,
+  short_answer: 0
+})
 const selectedChapter = computed(() => {
   if (selectedChapterId.value == null) return null
   return chapters.value.find((c) => String(c.id) === String(selectedChapterId.value)) ?? null
-})
-const selectedKnowledgePoint = computed(() => {
-  const ch = selectedChapter.value
-  if (!ch?.knowledge_points?.length) return null
-  return ch.knowledge_points.find((p) => String(p.id) === String(selectedKnowledgePointId.value)) ?? null
 })
 
 const selectedBtnStyle = { backgroundColor: '#1A365D', color: '#fff', borderColor: '#1A365D' }
@@ -319,8 +364,39 @@ const primaryBtnStyle = { backgroundColor: '#1A365D', color: '#fff' }
 function isChapterSelected(id) {
   return selectedChapterId.value != null && String(selectedChapterId.value) === String(id)
 }
+function toggleQuestionType(type) {
+  const cur = Number(questionTypeCounts.value[type] ?? 0)
+  if (cur > 0) {
+    questionTypeCounts.value[type] = 0
+    return
+  }
+  questionTypeCounts.value[type] = 1
+}
+
+function onQuestionTypeQtyChange(type) {
+  const v = Number(questionTypeCounts.value[type] ?? 0)
+  if (!Number.isFinite(v) || v < 1) {
+    questionTypeCounts.value[type] = 0
+    return
+  }
+  questionTypeCounts.value[type] = Math.floor(v)
+}
+
+const totalQuestionCount = computed(() => {
+  return Object.values(questionTypeCounts.value).reduce((sum, v) => sum + (Number(v) > 0 ? Number(v) : 0), 0)
+})
+
+function toggleKnowledgePoint(id) {
+  const idx = selectedKnowledgePointIds.value.findIndex((x) => String(x) === String(id))
+  if (idx >= 0) {
+    selectedKnowledgePointIds.value.splice(idx, 1)
+    return
+  }
+  selectedKnowledgePointIds.value.push(id)
+}
+
 function isKnowledgePointSelected(id) {
-  return selectedKnowledgePointId.value != null && String(selectedKnowledgePointId.value) === String(id)
+  return selectedKnowledgePointIds.value.some((x) => String(x) === String(id))
 }
 
 function renderTextbookMarkdown(text) {
@@ -332,13 +408,20 @@ function renderTextbookMarkdown(text) {
   }
 }
 const generating = ref(false)
-const currentQuestion = ref({
+const EMPTY_QUESTION = {
   content: '',
   correct_answer: '',
   scoring_points: [],
   question_type: '',
-  options: []
-})
+  options: [],
+  textbook_used: false,
+  chapter: null,
+  section_id: null,
+  section_title: '',
+  textbook_excerpt: '',
+  knowledge_point: ''
+}
+const currentQuestion = ref({ ...EMPTY_QUESTION })
 const userAnswer = ref('')
 const submitted = ref(false)
 const submitting = ref(false)
@@ -356,7 +439,7 @@ const canSubmit = computed(() => {
 
 function onSelectChapter(ch) {
   selectedChapterId.value = ch.id
-  selectedKnowledgePointId.value = null
+  selectedKnowledgePointIds.value = []
 }
 
 async function loadChapters() {
@@ -401,45 +484,126 @@ async function loadPoints() {
   } catch (_) {}
 }
 
-async function doGenerate() {
-  if (!selectedType.value || !selectedChapter.value || !selectedKnowledgePoint.value) return
-  generating.value = true
-  currentQuestion.value = {
-    content: '',
-    correct_answer: '',
-    scoring_points: [],
-    question_type: '',
-    options: [],
-    textbook_used: false,
-    chapter: null,
-    section_id: null,
-    section_title: '',
-    textbook_excerpt: ''
+function getQuizStorageKey() {
+  const login = String(userStore.userIdLogin || '').trim()
+  return `course_exercises_quiz_v1_${login || 'anon'}`
+}
+
+function saveQuizState() {
+  try {
+    const payload = {
+      chapterId: selectedChapterId.value,
+      questionTypeCounts: questionTypeCounts.value,
+      selectedKnowledgePointIds: selectedKnowledgePointIds.value,
+      quizQuestions: quizQuestions.value,
+      quizSubmissions: quizSubmissions.value,
+      currentQuestionIndex: currentQuestionIndex.value,
+      quizFinished: quizFinished.value
+    }
+    localStorage.setItem(getQuizStorageKey(), JSON.stringify(payload))
+  } catch (e) {
+    // localStorage 可能在无痕/受限环境不可用，这里静默失败即可
   }
+}
+
+function syncCurrentQuestionUI() {
+  const idx = currentQuestionIndex.value
+  const q = quizQuestions.value[idx]
+  currentQuestion.value = q ? q : { ...EMPTY_QUESTION }
+
+  const sub = quizSubmissions.value[idx]
+  if (sub && sub.user_answer != null) {
+    userAnswer.value = String(sub.user_answer ?? '')
+    submitted.value = true
+    resultCorrect.value = Number(sub.is_correct) === 1
+    resultExplanation.value = String(sub.explanation ?? '')
+  } else {
+    userAnswer.value = ''
+    submitted.value = false
+    resultCorrect.value = false
+    resultExplanation.value = ''
+  }
+}
+
+function restoreQuizState() {
+  try {
+    const raw = localStorage.getItem(getQuizStorageKey())
+    if (!raw) return
+    const saved = JSON.parse(raw)
+    if (!saved?.quizQuestions || !Array.isArray(saved.quizQuestions) || saved.quizQuestions.length === 0) return
+
+    selectedChapterId.value = saved.chapterId ?? null
+    questionTypeCounts.value = saved.questionTypeCounts || { choice: 0, fill: 0, short_answer: 0 }
+    selectedKnowledgePointIds.value = Array.isArray(saved.selectedKnowledgePointIds) ? saved.selectedKnowledgePointIds : []
+
+    quizQuestions.value = saved.quizQuestions
+    quizSubmissions.value = Array.isArray(saved.quizSubmissions) ? saved.quizSubmissions : []
+    currentQuestionIndex.value = Number(saved.currentQuestionIndex ?? 0)
+    quizFinished.value = Boolean(saved.quizFinished)
+
+    currentQuestionIndex.value = Math.min(Math.max(currentQuestionIndex.value, 0), quizQuestions.value.length - 1)
+    syncCurrentQuestionUI()
+  } catch (_) {
+    // 解析失败直接忽略恢复
+  }
+}
+
+function clearQuiz() {
+  try {
+    localStorage.removeItem(getQuizStorageKey())
+  } catch (_) {}
+  quizQuestions.value = []
+  quizSubmissions.value = []
+  currentQuestionIndex.value = 0
+  quizFinished.value = false
+  currentQuestion.value = { ...EMPTY_QUESTION }
   userAnswer.value = ''
   submitted.value = false
-  const kp = selectedKnowledgePoint.value
+  resultCorrect.value = false
+  resultExplanation.value = ''
+}
+
+async function doGenerate() {
+  if (!selectedChapter.value) return
+  if (totalQuestionCount.value <= 0) return
+
+  // 单次小测最多 10 道，按题型顺序截断（choice -> fill -> short_answer）
+  let remain = 10
+  const questionTypeCountsPayload = {}
+  for (const t of questionTypes) {
+    if (remain <= 0) break
+    const requested = Math.floor(Number(questionTypeCounts.value[t.value] ?? 0))
+    if (!Number.isFinite(requested) || requested <= 0) continue
+    const take = Math.min(requested, remain)
+    if (take > 0) questionTypeCountsPayload[t.value] = take
+    remain -= take
+  }
+  if (!Object.keys(questionTypeCountsPayload).length) return
+
+  generating.value = true
+  quizFinished.value = false
+  quizQuestions.value = []
+  quizSubmissions.value = []
+  currentQuestionIndex.value = 0
+  currentQuestion.value = { ...EMPTY_QUESTION }
+  userAnswer.value = ''
+  submitted.value = false
+
   try {
-    const res = await exerciseGenerate(
-      selectedType.value,
-      kp.title,
-      selectedChapter.value.id,
-      kp.section_id
-    )
-    currentQuestion.value = {
-      content: res.content || '',
-      correct_answer: res.correct_answer || '',
-      scoring_points: res.scoring_points || [],
-      question_type: res.question_type || selectedType.value,
-      options: res.options || [],
-      textbook_used: res.textbook_used === true,
-      chapter: res.chapter,
-      section_id: res.section_id,
-      section_title: res.section_title || '',
-      textbook_excerpt: res.textbook_excerpt || ''
-    }
+    const res = await exerciseQuizGenerate({
+      chapter: selectedChapter.value.id,
+      question_type_counts: questionTypeCountsPayload,
+      knowledge_point_ids: selectedKnowledgePointIds.value
+    })
+
+    quizQuestions.value = Array.isArray(res?.questions) ? res.questions : []
+    quizSubmissions.value = new Array(quizQuestions.value.length).fill(null)
+    currentQuestionIndex.value = 0
+    syncCurrentQuestionUI()
+    saveQuizState()
   } catch (e) {
     console.error(e)
+    // 失败时保持空状态，用户可重新操作
   } finally {
     generating.value = false
   }
@@ -448,9 +612,7 @@ async function doGenerate() {
 async function doSubmit() {
   if (!canSubmit.value || !currentQuestion.value.content) return
   submitting.value = true
-  const knowledgePoint = selectedKnowledgePoint.value
-    ? selectedKnowledgePoint.value.title
-    : ''
+  const knowledgePoint = currentQuestion.value.knowledge_point ? String(currentQuestion.value.knowledge_point) : ''
   let answerToSend = String(userAnswer.value).trim()
   if (currentQuestion.value.question_type === 'choice') {
     answerToSend = answerToSend.toUpperCase().charAt(0)
@@ -473,6 +635,12 @@ async function doSubmit() {
     resultCorrect.value = res.is_correct === 1
     resultExplanation.value = res.explanation || ''
     submitted.value = true
+    quizSubmissions.value[currentQuestionIndex.value] = {
+      user_answer: answerToSend,
+      is_correct: res.is_correct,
+      explanation: res.explanation || ''
+    }
+    saveQuizState()
     await loadPoints()
   } catch (e) {
     console.error(e)
@@ -481,22 +649,26 @@ async function doSubmit() {
   }
 }
 
-function resetQuestion() {
-  currentQuestion.value = {
-    content: '',
-    correct_answer: '',
-    scoring_points: [],
-    question_type: '',
-    options: [],
-    textbook_used: false,
-    chapter: null,
-    section_id: null,
-    section_title: '',
-    textbook_excerpt: ''
+function goNextQuestion() {
+  // 如果是最后一题：不清空题目，只标记“已完成”，避免用户误触导致内容消失
+  if (currentQuestionIndex.value + 1 >= quizQuestions.value.length) {
+    quizFinished.value = true
+    saveQuizState()
+    return
   }
-  userAnswer.value = ''
-  submitted.value = false
-  resultExplanation.value = ''
+
+  currentQuestionIndex.value += 1
+  quizFinished.value = false
+  syncCurrentQuestionUI()
+  saveQuizState()
+}
+
+function goPrevQuestion() {
+  if (currentQuestionIndex.value <= 0) return
+  currentQuestionIndex.value -= 1
+  quizFinished.value = false
+  syncCurrentQuestionUI()
+  saveQuizState()
 }
 
 function openWrongModal() {
@@ -657,9 +829,10 @@ function drawWrongChart() {
   chart.resize()
 }
 
-onMounted(() => {
-  loadChapters()
-  loadPoints()
+onMounted(async () => {
+  await loadChapters()
+  await loadPoints()
+  restoreQuizState()
 })
 </script>
 
@@ -830,28 +1003,57 @@ onMounted(() => {
   margin-bottom: 20px;
 }
 
-.exercises-type-btn {
-  padding: 8px 16px;
+.exercises-type-option {
+  flex: 1;
+  min-width: 160px;
+  padding: 12px 14px;
   border: 1px solid var(--gray-200);
-  border-radius: 20px;
+  border-radius: 12px;
   background-color: var(--white);
-  color: var(--gray-600);
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  white-space: nowrap;
+  transition: all 0.25s ease;
 }
 
-.exercises-type-btn:hover {
-  border-color: var(--primary-color);
-  color: var(--primary-color);
-}
-
-.exercises-select-section .exercises-type-btn.exercises-type-btn--selected,
-.exercises-select-section .exercises-type-btn[data-selected='true'] {
+.exercises-type-option--selected {
   background-color: var(--primary-color);
-  color: var(--white);
   border-color: var(--primary-color);
+}
+
+.exercises-type-option-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  user-select: none;
+}
+
+.exercises-type-option-label {
+  font-size: 14px;
+  color: var(--gray-600);
+}
+
+.exercises-type-option--selected .exercises-type-option-label {
+  color: var(--white);
+}
+
+.exercises-type-option--selected input[type='checkbox'] {
+  accent-color: #fff;
+}
+
+.exercises-type-qty-input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--gray-200);
+  font-size: 14px;
+  box-sizing: border-box;
+  background: var(--white);
+  color: var(--gray-600);
+}
+
+.exercises-type-option--selected .exercises-type-qty-input {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--white);
 }
 
 .exercises-chapters-loading {
@@ -916,6 +1118,9 @@ onMounted(() => {
 
 .exercises-generate-row {
   margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .exercises-generate-btn {
@@ -936,6 +1141,35 @@ onMounted(() => {
 .exercises-generate-btn:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+}
+
+.exercises-clear-quiz-btn {
+  padding: 10px 18px;
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  background-color: var(--white);
+  color: var(--gray-600);
+  font-size: 15px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s, background-color 0.2s;
+  white-space: nowrap;
+}
+
+.exercises-clear-quiz-btn:hover:not(:disabled) {
+  color: var(--primary-color);
+  border-color: var(--primary-color);
+  background-color: var(--light-bg);
+}
+
+.exercises-clear-quiz-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.exercises-quiz-limit-hint {
+  margin-top: 6px;
+  color: var(--gray-500);
+  font-size: 13px;
 }
 
 .exercises-question-section {
@@ -1182,6 +1416,39 @@ onMounted(() => {
   background-color: var(--light-bg);
 }
 
+.exercises-quiz-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.exercises-quiz-actions .exercises-next-btn {
+  margin-top: 0;
+}
+
+.exercises-prev-btn {
+  padding: 8px 20px;
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--gray-600);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.exercises-prev-btn:hover:not(:disabled) {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  background-color: var(--light-bg);
+}
+
+.exercises-prev-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 .exercises-empty-hint {
   text-align: center;
   color: var(--gray-500);
@@ -1270,6 +1537,47 @@ onMounted(() => {
   margin: 0;
   color: var(--gray-600);
   line-height: 1.4;
+}
+
+.wrong-item-answer {
+  margin: 0 0 4px 0;
+  line-height: 1.5;
+}
+
+/* 错题列表中的 Markdown 渲染 */
+.wrong-item-markdown {
+  margin-top: 2px;
+}
+.wrong-item-markdown p {
+  margin: 2px 0 6px;
+}
+.wrong-item-markdown p:last-child {
+  margin-bottom: 0;
+}
+.wrong-item-markdown ul,
+.wrong-item-markdown ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.wrong-item-markdown code {
+  background: var(--gray-200);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.wrong-item-markdown pre {
+  margin: 6px 0;
+  padding: 10px;
+  background: var(--gray-200);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.wrong-item-markdown pre code {
+  padding: 0;
+  background: none;
+}
+.wrong-item-markdown strong {
+  font-weight: 600;
 }
 
 @media (max-width: 639px) {

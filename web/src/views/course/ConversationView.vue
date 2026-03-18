@@ -80,7 +80,7 @@
                 <svg class="avatar-robot" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h2v1h2v2h2v2h1c.55 0 1 .45 1 1v2h1v2h-1v2H4v-2H3v-2h1v-2c0-.55.45-1 1-1h1v-2h2V8h2V7h2V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M8 18h8v-2H8v2m-1-5h2v2H7v-2m8 0v2h-2v-2h2m-3-3h2v2h-2v-2m-4 0v2H7v-2h2z"/></svg>
               </div>
               <div class="conversation-view-message-content ai">
-                <div class="message-text">你好！我是课程智能体，很高兴为你解答学习中的问题。请问有什么我可以帮助你的吗？</div>
+                <div class="message-text">你好！我是课程智能体，很高兴为你解答《计算机网络》学习中的问题。请问有什么我可以帮助你的吗？</div>
               </div>
             </div>
 
@@ -169,26 +169,13 @@
                 <input type="checkbox" v-model="enableWebSearch" class="conversation-view-web-search-cb" />
                 <span>启用网络搜索</span>
               </label>
-              <label class="conversation-view-kb-opt">
-                <span class="conversation-view-kb-label">知识库</span>
-                <select v-model="selectedKnowledgeBase" class="conversation-view-kb-select">
-                  <option value="">无</option>
-                  <option
-                    v-for="kb in courseKnowledgeBases"
-                    :key="kb.id"
-                    :value="kb.id"
-                  >
-                    {{ kb.name }}
-                  </option>
-                </select>
-              </label>
             </div>
             <div class="conversation-view-input-area">
               <textarea
                 ref="inputTextarea"
                 v-model="inputMessage"
                 class="conversation-view-textarea"
-                placeholder="请输入你的问题..."
+                placeholder="本平台仅支持计算机网络相关知识点提问（如协议、TCP/IP、HTTP、DNS、路由、网络安全等），与课程无关的问题将无法解答。"
                 @input="adjustTextareaHeight"
                 @keydown.enter.exact.prevent="sendMessage"
                 @keydown.enter.shift.exact="handleShiftEnter"
@@ -233,9 +220,7 @@ const store = useCourseConversationStore();
 const inputMessage = ref('');
 /** 启用网络搜索：与当前对话绑定，切换对话或切回页面时从 store 恢复 */
 const enableWebSearch = ref(false);
-/** 选中的课程知识库 id，空表示不检索课本；与当前对话绑定 */
-const selectedKnowledgeBase = ref('');
-/** 课程知识库列表（从接口拉取，用于下拉选项） */
+/** 课程知识库列表（从接口拉取，用于 textbookPdfBookId 等） */
 const courseKnowledgeBases = ref([]);
 
 /** 默认知识库 id（计算机网络）。仅用于新建对话的初始值；某对话改为「无」后只影响该对话，新建对话仍用此默认。 */
@@ -245,12 +230,6 @@ const DEFAULT_KNOWLEDGE_BASE_ID = 'computer_networking';
 const textbookPdfBookId = computed(() => {
   const kb = courseKnowledgeBases.value.find((k) => k.id === 'computer_networking');
   return kb?.pdf_book_id || 'ComputerNetworking-TopDown-v8-2021';
-});
-
-// 知识库选择与当前对话绑定：切换下拉时写入当前对话，切到别的界面再回来仍保留
-watch(selectedKnowledgeBase, (val) => {
-  const chat = store.currentChat;
-  if (chat) chat.knowledgeBase = val ?? '';
 });
 
 // 启用网络搜索与当前对话绑定：切换勾选时写入当前对话，切到别的界面再回来仍保留
@@ -459,8 +438,6 @@ const switchChat = async (chatId) => {
   store.setCurrentChatId(chatId);
   store.setThreadId(chat.threadId ?? chat.id);
   inputMessage.value = '';
-  // 按该对话已保存的值恢复：知识库为「无」时 chat.knowledgeBase 为 ''，?? 不会替换成默认值
-  selectedKnowledgeBase.value = chat.knowledgeBase !== undefined && chat.knowledgeBase !== null ? chat.knowledgeBase : DEFAULT_KNOWLEDGE_BASE_ID;
   enableWebSearch.value = Boolean(chat.enableWebSearch);
 
   if (userStore.isLoggedIn && store.defaultAgentId) {
@@ -503,7 +480,16 @@ const deleteChat = async (chatId) => {
 
   if (store.currentChatId === chatId) {
     if (store.chatList.length > 0) {
-      switchChat(store.chatList[0].id);
+      // 优先切到“被删除窗口的前一个”
+      // 由于这里已 splice(index, 1)，所以 index-1 对应的是删除前的前一个元素
+      const prevIndex = Math.max(0, index - 1);
+      const prevChat = store.chatList[prevIndex];
+      if (prevChat?.id) {
+        switchChat(prevChat.id);
+      } else {
+        // 理论上不会到这里：chatList.length > 0 且 prevIndex >= 0
+        switchChat(store.chatList[0].id);
+      }
     } else {
       createNewChat();
     }
@@ -535,6 +521,9 @@ const sendMessage = async () => {
   let tid = store.threadId || chat.threadId || chat.id || Date.now().toString() + Math.random().toString(36).substr(2, 9);
   if (!chat.threadId) chat.threadId = tid;
   store.setThreadId(tid);
+
+  /** 后端 400 等错误会先通过 onChunk(status:'error') 展示，再 throw，避免 catch 里重复追加同一条或通用网络提示 */
+  let errorAlreadyShown = false;
 
   // 流式缓冲：减少逐字更新 DOM，每 50ms 或结束时批量写入，使输出更流畅
   const STREAM_FLUSH_MS = 50;
@@ -642,6 +631,7 @@ const sendMessage = async () => {
           convStore.setActiveRequestChatId(null);
           if (convStore.currentChatId === chatIdForThisRequest) nextTick(() => scrollToBottom());
         } else if (chunk.status === 'error') {
+          errorAlreadyShown = true;
           if (streamFlushTimer != null) {
             clearTimeout(streamFlushTimer);
             streamFlushTimer = null;
@@ -655,7 +645,7 @@ const sendMessage = async () => {
           if (convStore.currentChatId === chatIdForThisRequest) nextTick(() => scrollToBottom());
         }
       },
-      { signal: controller.signal, enableWebSearch: store.currentChat?.enableWebSearch ?? enableWebSearch.value, knowledgeBase: store.currentChat?.knowledgeBase ?? selectedKnowledgeBase.value }
+      { signal: controller.signal, enableWebSearch: store.currentChat?.enableWebSearch ?? enableWebSearch.value, knowledgeBase: DEFAULT_KNOWLEDGE_BASE_ID }
     );
   } catch (error) {
     if (streamFlushTimer != null) {
@@ -677,8 +667,10 @@ const sendMessage = async () => {
         }
       } else {
         console.error('发送消息失败:', error);
-        const networkMsg = '无法连接服务器，请确认：1) 后端服务已启动；2) 浏览器访问的地址已正确代理到后端（如 localhost:5173 的 /api 会转发到后端）。若未登录，请先登录。';
-        targetChat.messages.push({ role: 'ai', content: networkMsg });
+        if (!errorAlreadyShown) {
+          const networkMsg = '无法连接服务器，请确认：1) 后端服务已启动；2) 浏览器访问的地址已正确代理到后端（如 localhost:5173 的 /api 会转发到后端）。若未登录，请先登录。';
+          targetChat.messages.push({ role: 'ai', content: networkMsg });
+        }
       }
     }
     store.clearCurrentAiMessage();
@@ -714,15 +706,11 @@ onMounted(async () => {
 
   if (!userStore.isLoggedIn) {
     if (store.chatList.length === 0) createNewChat();
-    else {
-      selectedKnowledgeBase.value = store.currentChat?.knowledgeBase ?? DEFAULT_KNOWLEDGE_BASE_ID;
-      enableWebSearch.value = Boolean(store.currentChat?.enableWebSearch);
-    }
+    else enableWebSearch.value = Boolean(store.currentChat?.enableWebSearch);
     return;
   }
 
   if (store.chatList.length > 0) {
-    selectedKnowledgeBase.value = store.currentChat?.knowledgeBase ?? DEFAULT_KNOWLEDGE_BASE_ID;
     enableWebSearch.value = Boolean(store.currentChat?.enableWebSearch);
     return;
   }
@@ -1373,37 +1361,6 @@ const scrollToBottom = () => {
   color: var(--gray-600);
   cursor: pointer;
   user-select: none;
-}
-
-.conversation-view-kb-opt {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-size: 14px;
-  color: var(--gray-600);
-  cursor: pointer;
-  user-select: none;
-}
-
-.conversation-view-kb-label {
-  flex-shrink: 0;
-}
-
-.conversation-view-kb-select {
-  padding: 4px 8px;
-  border: 1px solid var(--gray-200);
-  border-radius: 6px;
-  font-size: 14px;
-  color: var(--dark-text);
-  background: var(--white);
-  cursor: pointer;
-  min-width: 120px;
-}
-
-.conversation-view-kb-select:focus {
-  outline: none;
-  border-color: var(--primary-color);
 }
 
 .conversation-view-web-search-cb {

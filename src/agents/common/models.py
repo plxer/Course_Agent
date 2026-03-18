@@ -47,11 +47,18 @@ def load_chat_model(fully_specified_name: str, **kwargs) -> BaseChatModel:
         try:  # 其他模型，默认使用OpenAIBase, like openai, zhipuai
             from langchain_openai import ChatOpenAI
 
+            # SiliconFlow 的 DeepSeek reasoning 可通过 thinking_budget 控制链路长度。
+            # SiliconFlow 要求 thinking_budget 必须 > 0，因此这里设为极小值。
+            extra_body = None
+            if provider == "siliconflow" and "deepseek" in model.lower():
+                extra_body = {"thinking_budget": 1}
+
             return ChatOpenAI(
                 model=model,
                 api_key=SecretStr(api_key),
                 base_url=base_url,
                 stream_usage=True,
+                extra_body=extra_body,
             )
         except Exception as e:
             raise ValueError(f"Model provider {provider} load failed, {e} \n {traceback.format_exc()}")

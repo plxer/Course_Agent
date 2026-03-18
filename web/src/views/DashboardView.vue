@@ -168,10 +168,24 @@
           >
             <template #expandedRowRender="{ record }">
               <div class="exercise-detail">
-                <p v-if="record.question_content" class="exercise-detail-row"><strong>题目：</strong>{{ record.question_content }}</p>
-                <p class="exercise-detail-row"><strong>我的答案：</strong>{{ record.user_answer || '—' }}</p>
-                <p class="exercise-detail-row"><strong>正确答案：</strong>{{ record.correct_answer || '—' }}</p>
-                <p v-if="record.explanation" class="exercise-detail-row"><strong>解析：</strong>{{ record.explanation }}</p>
+                <div v-if="record.question_content" class="exercise-detail-row">
+                  <strong>题目：</strong>
+                  <div class="exercise-detail-markdown" v-html="renderMarkdown(record.question_content)"></div>
+                </div>
+                <div class="exercise-detail-row">
+                  <strong>我的答案：</strong>
+                  <div v-if="record.user_answer" class="exercise-detail-markdown" v-html="renderMarkdown(record.user_answer)"></div>
+                  <span v-else>—</span>
+                </div>
+                <div class="exercise-detail-row">
+                  <strong>正确答案：</strong>
+                  <div v-if="record.correct_answer" class="exercise-detail-markdown" v-html="renderMarkdown(record.correct_answer)"></div>
+                  <span v-else>—</span>
+                </div>
+                <div v-if="record.explanation" class="exercise-detail-row">
+                  <strong>解析：</strong>
+                  <div class="exercise-detail-markdown" v-html="renderMarkdown(record.explanation)"></div>
+                </div>
                 <p v-if="record.section_title" class="exercise-detail-row exercise-detail-meta"><strong>章节：</strong>{{ record.section_title }}</p>
               </div>
             </template>
@@ -236,7 +250,8 @@
             >
               <span class="detail-message-role">{{ msg.role === 'user' ? '用户' : 'AI' }}</span>
               <span class="detail-message-time">{{ formatDetailTime(msg.created_at) }}</span>
-              <div class="detail-message-content">{{ msg.content || '—' }}</div>
+              <div v-if="!msg.content" class="detail-message-content">—</div>
+              <div v-else class="detail-message-content dashboard-detail-markdown" v-html="renderMarkdown(msg.content)"></div>
             </div>
           </div>
           <div v-else class="detail-messages-empty">暂无消息</div>
@@ -256,6 +271,7 @@ const props = defineProps({
   embedMode: { type: Boolean, default: false }
 })
 import dayjs, { parseToShanghai } from '@/utils/time'
+import { marked } from 'marked'
 
 // 导入子组件
 import StatusBar from '@/components/StatusBar.vue'
@@ -472,6 +488,12 @@ const formatDetailTime = (dateString) => {
   if (!dateString) return '—'
   const parsed = parseToShanghai(dateString)
   return parsed ? parsed.format('YYYY-MM-DD HH:mm:ss') : '—'
+}
+
+// Markdown 渲染（做题记录、对话详情）
+function renderMarkdown(text) {
+  if (!text || typeof text !== 'string') return ''
+  return marked.parse(text, { gfm: true, breaks: true })
 }
 
 // 查看对话详情
@@ -787,6 +809,43 @@ onUnmounted(() => {
   font-size: 12px;
 }
 
+/* 做题记录详情中的 Markdown 渲染 */
+.exercise-detail-markdown {
+  margin-top: 2px;
+}
+.exercise-detail-markdown p {
+  margin: 2px 0 6px;
+}
+.exercise-detail-markdown p:last-child {
+  margin-bottom: 0;
+}
+.exercise-detail-markdown ul,
+.exercise-detail-markdown ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.exercise-detail-markdown code {
+  background: var(--gray-200);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.exercise-detail-markdown pre {
+  margin: 6px 0;
+  padding: 10px;
+  background: var(--gray-200);
+  border-radius: 6px;
+  overflow-x: auto;
+  display: block;
+}
+.exercise-detail-markdown pre code {
+  padding: 0;
+  background: none;
+}
+.exercise-detail-markdown strong {
+  font-weight: 600;
+}
+
 // Dashboard 特有的对话记录样式
 .conversations-section {
   .conversation-title {
@@ -1037,8 +1096,45 @@ onUnmounted(() => {
 .conversation-detail-modal .detail-message-content {
   margin-top: 6px;
   color: var(--gray-1000);
-  white-space: pre-wrap;
   word-break: break-word;
+}
+.conversation-detail-modal .detail-message-content:not(.dashboard-detail-markdown) {
+  white-space: pre-wrap;
+}
+/* Markdown 渲染：对话详情 */
+.conversation-detail-modal .dashboard-detail-markdown {
+  white-space: normal;
+}
+.conversation-detail-modal .dashboard-detail-markdown p {
+  margin: 0 0 6px;
+}
+.conversation-detail-modal .dashboard-detail-markdown p:last-child {
+  margin-bottom: 0;
+}
+.conversation-detail-modal .dashboard-detail-markdown ul,
+.conversation-detail-modal .dashboard-detail-markdown ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.conversation-detail-modal .dashboard-detail-markdown code {
+  background: var(--gray-200);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.conversation-detail-modal .dashboard-detail-markdown pre {
+  margin: 6px 0;
+  padding: 10px;
+  background: var(--gray-200);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.conversation-detail-modal .dashboard-detail-markdown pre code {
+  padding: 0;
+  background: none;
+}
+.conversation-detail-modal .dashboard-detail-markdown strong {
+  font-weight: 600;
 }
 .conversation-detail-modal .detail-messages-empty,
 .conversation-detail-modal .detail-loading {

@@ -166,6 +166,20 @@ export function exerciseGenerate(questionType, knowledgePoint, chapter = null, s
   return apiPost('/api/course/exercises/generate', body, {}, true)
 }
 
+/** 生成小测：一次性生成多题（多种题型 + 数量），可选知识点集合（默认空表示用该章节全部知识点） */
+export function exerciseQuizGenerate({ chapter, question_type_counts, knowledge_point_ids = [] }) {
+  return apiPost(
+    '/api/course/exercises/generate-quiz',
+    {
+      chapter,
+      question_type_counts,
+      knowledge_point_ids
+    },
+    {},
+    true
+  )
+}
+
 /** 提交答案 */
 export function exerciseSubmit(payload) {
   return apiPost('/api/course/exercises/submit', payload, {}, true)

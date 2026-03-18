@@ -445,6 +445,10 @@ async def stream_agent_chat(
             conv_metadata = {"source": meta.get("source", "conversation")}
             if conv_metadata.get("source") == "reading" and meta.get("book_id"):
                 conv_metadata["book_id"] = meta.get("book_id")
+                if meta.get("book_type"):
+                    conv_metadata["book_type"] = meta.get("book_type")
+                if meta.get("book_label"):
+                    conv_metadata["book_label"] = meta.get("book_label")
             await conv_repo.create_conversation(
                 user_id=user_id,
                 agent_id=agent_id,
