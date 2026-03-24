@@ -13,6 +13,7 @@ import traceback
 from collections.abc import Callable
 from typing import Any, cast
 
+import httpx
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +31,10 @@ _mcp_lock = asyncio.Lock()
 # Global MCP tools cache
 _mcp_tools_cache: dict[str, list[Callable[..., Any]]] = {}
 
+# Singleflight: prevent concurrent cache-miss refreshes for the same MCP server.
+# Key = server_name, Value = in-flight task that returns the UNFILTERED tool list.
+_mcp_tools_inflight: dict[str, asyncio.Task[list[Callable[..., Any]]]] = {}
+
 # MCP tools statistics (for reporting enabled/disabled counts)
 _mcp_tools_stats: dict[str, dict[str, int]] = {}
 
@@ -44,6 +49,8 @@ _DEFAULT_MCP_SERVERS = {
         "description": "顺序思考工具，帮助 AI 将复杂问题分解为多个步骤",
         "icon": "🧠",
         "tags": ["内置", "AI"],
+        # 依赖境外公网，Docker/内网环境常 ConnectTimeout；默认关闭，需用时在系统设置中启用
+        "enabled": 0,
     },
     "mcp-server-chart": {
         "command": "npx",
@@ -58,6 +65,29 @@ _DEFAULT_MCP_SERVERS = {
 # =============================================================================
 # === Core Logic (Moved from agents/common/mcp.py) ===
 # =============================================================================
+
+
+def _is_connect_timeout_error(exc: BaseException) -> bool:
+    """识别 httpx 连接超时（含 ExceptionGroup 包裹）。"""
+    pending: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while pending:
+        e = pending.pop()
+        eid = id(e)
+        if eid in seen:
+            continue
+        seen.add(eid)
+        if isinstance(e, httpx.ConnectTimeout | httpx.ReadTimeout):
+            return True
+        if isinstance(e, BaseExceptionGroup):
+            pending.extend(e.exceptions)
+            continue
+        if e.__cause__ is not None:
+            pending.append(e.__cause__)
+        ctx = e.__context__
+        if ctx is not None and ctx is not e.__cause__:
+            pending.append(ctx)
+    return False
 
 
 async def load_mcp_servers_from_db() -> None:
@@ -135,7 +165,7 @@ async def init_mcp_servers() -> None:
                         sse_read_timeout=config.get("sse_read_timeout"),
                         tags=config.get("tags"),
                         icon=config.get("icon"),
-                        enabled=1,
+                        enabled=int(config.get("enabled", 1)),
                         created_by="system",
                         updated_by="system",
                     )
@@ -160,7 +190,7 @@ async def init_mcp_servers() -> None:
                             sse_read_timeout=config.get("sse_read_timeout"),
                             tags=config.get("tags"),
                             icon=config.get("icon"),
-                            enabled=1,
+                            enabled=int(config.get("enabled", 1)),
                             created_by="system",
                             updated_by="system",
                         )
@@ -228,13 +258,114 @@ async def get_mcp_tools(
     async with _mcp_lock:
         mcp_servers = MCP_SERVERS | (additional_servers or {})
 
-    all_processed_tools = []
+    all_processed_tools: list[Callable[..., Any]] = []
+    task_to_await: asyncio.Task[list[Callable[..., Any]]] | None = None
+    tools_loaded = False
 
     # 2. Check Cache / Fetch Strategy
     # If we have it in cache and don't need to force refresh, use cache.
-    if not force_refresh and cache and server_name in _mcp_tools_cache:
-        all_processed_tools = _mcp_tools_cache[server_name]
-    else:
+    if not force_refresh and cache:
+        # Avoid holding the lock while awaiting network/stdio operations.
+        async with _mcp_lock:
+            cached = _mcp_tools_cache.get(server_name)
+            if cached is not None:
+                all_processed_tools = cached
+                tools_loaded = True
+            else:
+                # Singleflight only when cache-miss depends only on global MCP config.
+                # If additional_servers is provided, correctness could be impacted, so we skip singleflight there.
+                if additional_servers is None:
+                    inflight = _mcp_tools_inflight.get(server_name)
+                    if inflight is not None:
+                        task_to_await = inflight
+                    else:
+                        async def _do_fetch() -> list[Callable[..., Any]]:
+                            try:
+                                # Need to fetch from server
+                                try:
+                                    assert server_name in mcp_servers, (
+                                        f"Server {server_name} not found in ({list(mcp_servers.keys())})"
+                                    )
+
+                                    # Extract connection config
+                                    server_config = mcp_servers[server_name]
+                                    client_config = {
+                                        k: v for k, v in server_config.items() if k not in ("disabled_tools",)
+                                    }
+
+                                    client = await get_mcp_client({server_name: client_config})
+                                    if client is None:
+                                        return []
+
+                                    # Get ALL tools (Raw)
+                                    raw_tools = cast(list[Any], await client.get_tools())
+
+                                    # Render IDs for ALL tools
+                                    server_cc = to_camel_case(server_name)
+                                    tools: list[Callable[..., Any]] = []
+                                    for tool in raw_tools:
+                                        # Render unique ID rule: mcp__[camelCaseServer]__[camelCaseTool]
+                                        original_name = tool.name
+                                        tool_cc = to_camel_case(original_name)
+                                        unique_id = f"mcp__{server_cc}__{tool_cc}"
+
+                                        # Use metadata to store
+                                        if tool.metadata is None:
+                                            tool.metadata = {}
+                                        tool.metadata["id"] = unique_id
+
+                                        tools.append(tool)
+
+                                    # Update Cache (Store the FULL list)
+                                    _mcp_tools_cache[server_name] = tools
+
+                                    # Update Stats
+                                    # Stats should reflect the GLOBAL configuration state
+                                    # (How many are disabled in the stored config, not the transient arg)
+                                    global_config_disabled = (
+                                        mcp_servers.get(server_name, {}).get("disabled_tools") or []
+                                    )
+                                    enabled_count = len([t for t in tools if t.name not in global_config_disabled])
+
+                                    _mcp_tools_stats[server_name] = {
+                                        "total": len(tools),
+                                        "enabled": enabled_count,
+                                        "disabled": len(tools) - enabled_count,
+                                    }
+
+                                    logger.info(
+                                        f"Refreshed MCP tools cache for '{server_name}': {len(tools)} tools loaded."
+                                    )
+                                    return tools
+                                except AssertionError as e:
+                                    logger.warning(f"[assert] Failed to load tools from MCP server '{server_name}': {e}")
+                                    return []
+                                except BaseException as e:
+                                    if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                                        raise
+                                    if _is_connect_timeout_error(e):
+                                        logger.warning(
+                                            "MCP 服务器 '%s' 连接超时（外网不可达或防火墙）；可在系统设置中关闭该 MCP 或检查 URL",
+                                            server_name,
+                                        )
+                                        return []
+                                    logger.error(
+                                        f"Failed to load tools from MCP server '{server_name}': {e}, traceback: {traceback.format_exc()}"
+                                    )
+                                    return []
+                            finally:
+                                async with _mcp_lock:
+                                    _mcp_tools_inflight.pop(server_name, None)
+
+                        task_to_await = asyncio.create_task(_do_fetch())
+                        _mcp_tools_inflight[server_name] = task_to_await
+
+    if not all_processed_tools and task_to_await is not None:
+        all_processed_tools = await task_to_await
+        tools_loaded = True
+
+    # Fallback path: cache-miss but not using singleflight (force_refresh=True or additional_servers provided)
+    if not tools_loaded and (force_refresh or not cache or additional_servers is not None):
         # Need to fetch from server
         try:
             assert server_name in mcp_servers, f"Server {server_name} not found in ({list(mcp_servers.keys())})"
@@ -252,41 +383,44 @@ async def get_mcp_tools(
 
             # Render IDs for ALL tools
             server_cc = to_camel_case(server_name)
+            tools: list[Callable[..., Any]] = []
             for tool in raw_tools:
-                # Render unique ID rule: mcp__[camelCaseServer]__[camelCaseTool]
                 original_name = tool.name
                 tool_cc = to_camel_case(original_name)
                 unique_id = f"mcp__{server_cc}__{tool_cc}"
 
-                # Use metadata to store
                 if tool.metadata is None:
                     tool.metadata = {}
                 tool.metadata["id"] = unique_id
 
-                all_processed_tools.append(tool)
+                tools.append(tool)
 
-            # Update Cache (Store the FULL list)
             if cache:
-                _mcp_tools_cache[server_name] = all_processed_tools
-
-                # Update Stats
-                # Stats should reflect the GLOBAL configuration state
-                # (How many are disabled in the stored config, not the transient arg)
+                _mcp_tools_cache[server_name] = tools
                 global_config_disabled = mcp_servers.get(server_name, {}).get("disabled_tools") or []
-                enabled_count = len([t for t in all_processed_tools if t.name not in global_config_disabled])
-
+                enabled_count = len([t for t in tools if t.name not in global_config_disabled])
                 _mcp_tools_stats[server_name] = {
-                    "total": len(all_processed_tools),
+                    "total": len(tools),
                     "enabled": enabled_count,
-                    "disabled": len(all_processed_tools) - enabled_count,
+                    "disabled": len(tools) - enabled_count,
                 }
 
-                logger.info(f"Refreshed MCP tools cache for '{server_name}': {len(all_processed_tools)} tools loaded.")
+                logger.info(f"Refreshed MCP tools cache for '{server_name}': {len(tools)} tools loaded.")
 
+            all_processed_tools = tools
+            tools_loaded = True
         except AssertionError as e:
             logger.warning(f"[assert] Failed to load tools from MCP server '{server_name}': {e}")
             return []
-        except Exception as e:
+        except BaseException as e:
+            if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                raise
+            if _is_connect_timeout_error(e):
+                logger.warning(
+                    "MCP 服务器 '%s' 连接超时（外网不可达或防火墙）；可在系统设置中关闭该 MCP 或检查 URL",
+                    server_name,
+                )
+                return []
             logger.error(
                 f"Failed to load tools from MCP server '{server_name}': {e}, traceback: {traceback.format_exc()}"
             )

@@ -1,11 +1,13 @@
 """课程智能体路由：课本伴读、视频伴读、课程对话流。"""
 
+import math
 import os
 import re
 import json
 import uuid
 import random
 from pathlib import Path
+from typing import Any
 
 import fitz
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,6 +16,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src import config as conf
+from src.config import course_reading_paddle_ocr_enabled
 from src.agents import agent_manager
 from src import knowledge_base as kb_manager
 from sqlalchemy import func, select, update
@@ -21,6 +24,12 @@ from sqlalchemy import func, select, update
 from src.agents.common import load_chat_model
 from src.services.chat_stream_service import stream_agent_chat
 from src.services.exercise_service import grade_answer, generate_question
+from src.services.llm_usage_log_service import (
+    COURSE_RELEVANCE_AGENT_ID,
+    COURSE_TRANSLATE_AGENT_ID,
+    extract_usage_from_lc_response,
+    log_course_aux_llm_call,
+)
 from src.services.textbook_service import get_textbook_chapters
 from src.storage.postgres.models_business import (
     BookReadingPosition,
@@ -34,6 +43,18 @@ from src.utils.datetime_utils import format_utc_datetime, utc_now_naive
 from server.utils.auth_middleware import get_db, get_required_user
 
 course = APIRouter(prefix="/course", tags=["course"])
+
+_EXERCISE_QUESTION_TYPES = frozenset({"choice", "multi_choice", "short_answer", "calculation"})
+
+
+def _knowledge_point_sampling_weight(wrong_attempts: int) -> float:
+    """
+    小测抽知识点时的权重：用于 random.choices(..., weights=)。
+    基线 1 保证每个知识点都有正概率；错题次数用平方根缓增，避免线性权重下单点错题过多时几乎垄断抽样。
+    """
+    w = max(0, int(wrong_attempts))
+    return 1.0 + math.sqrt(w)
+
 
 # 课本目录：环境变量 KNOWLEDGEBASE_DIR 或默认 knowledgebase（相对项目根）
 _KNOWLEDGEBASE_DIR = os.environ.get("KNOWLEDGEBASE_DIR", "knowledgebase")
@@ -298,7 +319,40 @@ async def _get_course_knowledge_context(query: str, kb_id: str, current_user) ->
     return "\n".join(parts).strip() if parts else ""
 
 
-async def _is_query_related_to_computer_networking(query: str) -> bool:
+def _message_content_to_text(content) -> str:
+    """将 LLM 返回的 content（str 或多段块列表）拼成纯文本。"""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+        return "".join(parts)
+    return str(content)
+
+
+def _llm_answer_is_no_relevant(text: str) -> bool:
+    """仅当模型明确给出否定相关时返回 True；用 \\b 避免 NOBODY、NOTE 等被 startswith('NO') 误判。"""
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    if raw.startswith("否") or raw.startswith("不相关"):
+        return True
+    upper = raw.upper()
+    return bool(re.match(r"^\s*(NO|NOT)\b", upper))
+
+
+async def _is_query_related_to_computer_networking(
+    query: str,
+    *,
+    db: AsyncSession | None = None,
+    stats_user_id: int | None = None,
+) -> bool:
     """
     判断用户问题是否与《计算机网络》课程相关。不相关则返回 False，便于尽早拒绝以节省 token。
     调用异常或超时时视为相关，避免误拦。
@@ -321,9 +375,22 @@ async def _is_query_related_to_computer_networking(query: str) -> bool:
             HumanMessage(content=query),
         ]
         resp = await model.ainvoke(msg_list)
-        text = (resp.content if hasattr(resp, "content") else str(resp)).strip().upper()
-        # 仅当明确回答 NO 时判为不相关
-        if text.startswith("NO") or text == "NO":
+        text = _message_content_to_text(
+            resp.content if hasattr(resp, "content") else resp
+        )
+        if db is not None and stats_user_id is not None:
+            inp, outp = extract_usage_from_lc_response(resp)
+            await log_course_aux_llm_call(
+                db,
+                user_int_id=stats_user_id,
+                agent_id=COURSE_RELEVANCE_AGENT_ID,
+                model_spec=conf.fast_model,
+                content=text[:500],
+                input_tokens=inp,
+                output_tokens=outp,
+                source="course_query_relevance",
+            )
+        if _llm_answer_is_no_relevant(text):
             return False
         return True
     except Exception as e:
@@ -348,7 +415,9 @@ async def course_chat_stream(
         )
 
     # 先检测问题是否与计算机网络相关，完全不相关则立即停止并提示，减少 token 浪费
-    if not await _is_query_related_to_computer_networking(request.query):
+    if not await _is_query_related_to_computer_networking(
+        request.query, db=db, stats_user_id=current_user.id
+    ):
         raise HTTPException(
             status_code=400,
             detail="您的问题与《计算机网络》课程内容无关。为节省资源，请仅在此处询问与计算机网络相关的问题（如协议、TCP/IP、HTTP、DNS、路由、网络安全等）。",
@@ -498,55 +567,77 @@ def ocr_text_selection(body: OcrRequest):
             clip = rect & page.rect
             if clip.is_empty:
                 return {"success": True, "text": ""}
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=clip, alpha=False)
-            img_bytes = pix.tobytes(output="png")
 
-            # 优先 PaddleOCR（高精度），其次 RapidOCR，最后 PDF 文本兜底
-            text = ""
-            try:
-                from src.plugins.paddle_ocr_processor import PaddleOcrProcessor
+            # 1) PDF 内置文字层（可选中复制的矢量 PDF，无渲染、无模型；扫描页通常为空）
+            words = page.get_text("words", clip=clip)
+            text = " ".join(w[4] for w in words).strip()
+            used_engine: str | None = "pdf_text" if text else None
 
-                proc = PaddleOcrProcessor()
-                if proc.check_health().get("status") == "healthy":
-                    import tempfile
-
-                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                        tmp.write(img_bytes)
-                        tmp.flush()
-                        try:
-                            text = (proc.process_file(tmp.name) or "").strip()
-                            if text:
-                                logger.info("课本伴读 OCR 使用 PaddleOCR，识别 %d 字", len(text))
-                        finally:
-                            Path(tmp.name).unlink(missing_ok=True)
-            except Exception:
-                pass
+            # 2) 无文字层时再渲染选区图并走 OCR
             if not text:
+                import tempfile
+
+                from src.plugins.document_processor_base import OCRException
+                from src.plugins.rapid_ocr_processor import get_course_reading_rapid_ocr_processor
+
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=clip, alpha=False)
+                img_bytes = pix.tobytes(output="png")
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                    tmp.write(img_bytes)
+                    tmp.flush()
+                    tmp_path = tmp.name
                 try:
-                    from src.plugins.rapid_ocr_processor import RapidOcrProcessor
+                    rapid = get_course_reading_rapid_ocr_processor()
+                    rh = rapid.check_health()
+                    if rh.get("status") == "healthy":
+                        try:
+                            text = (rapid.process_file(tmp_path) or "").strip()
+                            if text:
+                                used_engine = "rapid_ocr"
+                        except OCRException as e:
+                            if course_reading_paddle_ocr_enabled():
+                                logger.warning("课本伴读 RapidOCR 失败，将尝试 PaddleOCR: {}", e)
+                            else:
+                                logger.warning("课本伴读 RapidOCR 失败: {}", e)
+                    else:
+                        if course_reading_paddle_ocr_enabled():
+                            logger.info(
+                                "课本伴读 RapidOCR 不可用: {}，将尝试 PaddleOCR",
+                                rh.get("message"),
+                            )
+                        else:
+                            logger.info("课本伴读 RapidOCR 不可用: {}", rh.get("message"))
 
-                    proc = RapidOcrProcessor()
-                    if proc.check_health().get("status") == "healthy":
-                        import tempfile
+                    if not text and course_reading_paddle_ocr_enabled():
+                        from src.plugins.paddle_ocr_processor import get_course_reading_ocr_processor
 
-                        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                            tmp.write(img_bytes)
-                            tmp.flush()
+                        paddle = get_course_reading_ocr_processor()
+                        ph = paddle.check_health()
+                        if ph.get("status") == "healthy":
                             try:
-                                text = (proc.process_file(tmp.name) or "").strip()
-                            finally:
-                                Path(tmp.name).unlink(missing_ok=True)
-                except Exception:
-                    pass
-            if not text:
-                words = page.get_text("words", clip=clip)
-                text = " ".join(w[4] for w in words).strip()
+                                t2 = (paddle.process_file(tmp_path) or "").strip()
+                                if t2:
+                                    text = t2
+                                    used_engine = "paddle_ocr"
+                            except OCRException as e:
+                                logger.warning("课本伴读 PaddleOCR 失败: {}", e)
+                        else:
+                            logger.info("课本伴读 PaddleOCR 不可用: {}", ph.get("message"))
+                finally:
+                    Path(tmp_path).unlink(missing_ok=True)
+
+            if text and used_engine:
+                logger.info("课本伴读选区文本来源 {}，共 {} 字", used_engine, len(text))
+            elif used_engine in ("rapid_ocr", "paddle_ocr"):
+                logger.info("课本伴读 OCR 使用 {}，未识别到文本", used_engine)
+
             return {"success": True, "text": text}
         finally:
             doc.close()
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("课本伴读 OCR 未捕获异常: {}", e)
         raise HTTPException(status_code=500, detail=f"OCR 失败: {e!s}") from e
 
 
@@ -561,6 +652,7 @@ class TranslateRequest(BaseModel):
 async def translate_text(
     body: TranslateRequest,
     current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """将选区文本翻译为中文（默认英译汉），不保存结果。"""
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -578,6 +670,17 @@ async def translate_text(
         ]
         resp = await model.ainvoke(msg_list)
         translated = (resp.content if hasattr(resp, "content") else str(resp)).strip()
+        inp, outp = extract_usage_from_lc_response(resp)
+        await log_course_aux_llm_call(
+            db,
+            user_int_id=current_user.id,
+            agent_id=COURSE_TRANSLATE_AGENT_ID,
+            model_spec=conf.fast_model,
+            content=translated,
+            input_tokens=inp,
+            output_tokens=outp,
+            source="course_reading_translate",
+        )
         return {"success": True, "translated": translated}
     except Exception as e:
         logger.warning("translate_text failed: %s", e)
@@ -657,7 +760,7 @@ async def exercises_textbook_chapters():
 
 
 class ExerciseGenerateRequest(BaseModel):
-    question_type: str  # choice / fill / short_answer
+    question_type: str  # choice / multi_choice / short_answer / calculation
     knowledge_point: str
     chapter: int | None = None  # 章号 1–8，与 knowledge_point 一起时结合课本出题
     section_id: str | None = None  # 小节 id 如 "1.1"，不填则用整章
@@ -667,14 +770,19 @@ class ExerciseGenerateRequest(BaseModel):
 async def exercises_generate(
     body: ExerciseGenerateRequest,
     current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """根据题型和知识点生成一道题（不落库，提交答案时再记录）；可选章节时结合课本内容出题。"""
+    if body.question_type not in _EXERCISE_QUESTION_TYPES:
+        raise HTTPException(status_code=400, detail=f"不支持的题型：{body.question_type}")
     try:
         out = await generate_question(
             body.question_type,
             body.knowledge_point,
             chapter=body.chapter,
             section_id=body.section_id,
+            db=db,
+            stats_user_id=current_user.id,
         )
         return out
     except ValueError as e:
@@ -683,22 +791,22 @@ async def exercises_generate(
 
 class ExerciseQuizGenerateRequest(BaseModel):
     chapter: int  # 章号 1–8
-    question_type_counts: dict[str, int]  # {"choice": 2, "fill": 3, ...}
+    question_type_counts: dict[str, int]  # {"choice": 2, "multi_choice": 1, ...}
     knowledge_point_ids: list[str] = []  # 空表示使用该章节全部知识点
 
 
-@course.post("/exercises/generate-quiz")
-async def exercises_generate_quiz(
+async def _build_exercise_quiz_plan(
     body: ExerciseQuizGenerateRequest,
-    current_user: User = Depends(get_required_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """生成小测：一次生成多题（多种题型 + 数量）。知识点支持可选集合；未选时默认个性化抽取。"""
-
-    allowed_types = {"choice", "fill", "short_answer"}
+    current_user: User,
+    db: AsyncSession,
+) -> list[dict[str, Any]]:
+    """
+    小测抽题位（题型 + 知识点），不调用 LLM。
+    与 generate-quiz 相同的错题加权抽样逻辑，供前端逐题调用 /exercises/generate。
+    """
     question_sequence: list[str] = []
     for q_type, count in (body.question_type_counts or {}).items():
-        if q_type not in allowed_types:
+        if q_type not in _EXERCISE_QUESTION_TYPES:
             raise HTTPException(status_code=400, detail=f"不支持的题型：{q_type}")
         n = int(count or 0)
         if n <= 0:
@@ -726,7 +834,6 @@ async def exercises_generate_quiz(
 
     eligible_titles = [str(kp.get("title") or "") for kp in eligible_kps]
 
-    # 个性化：权重 = 错题次数 + 1（保证未出现过的知识点仍有非零概率）
     q_wrong = (
         select(ExerciseAttempt.knowledge_point, func.count(ExerciseAttempt.id).label("count"))
         .where(
@@ -741,19 +848,60 @@ async def exercises_generate_quiz(
     wrong_rows = result.all()
     wrong_cnt_by_title: dict[str, int] = {str(r[0] or "").strip() or "未分类": int(r[1] or 0) for r in wrong_rows}
 
-    weights = [wrong_cnt_by_title.get(str(kp.get("title") or "").strip() or "未分类", 0) + 1 for kp in eligible_kps]
+    weights = [
+        _knowledge_point_sampling_weight(
+            wrong_cnt_by_title.get(str(kp.get("title") or "").strip() or "未分类", 0)
+        )
+        for kp in eligible_kps
+    ]
 
-    questions: list[dict] = []
+    plan: list[dict[str, Any]] = []
     for q_type in question_sequence:
         kp = random.choices(eligible_kps, weights=weights, k=1)[0]
-        out = await generate_question(
-            q_type,
-            kp.get("title") or "",
-            chapter=body.chapter,
-            section_id=kp.get("section_id"),
+        plan.append(
+            {
+                "question_type": q_type,
+                "knowledge_point": kp.get("title") or "",
+                "knowledge_point_id": kp.get("id"),
+                "section_id": kp.get("section_id"),
+            }
         )
-        out["knowledge_point_id"] = kp.get("id")
-        out["knowledge_point"] = kp.get("title") or ""
+    return plan
+
+
+@course.post("/exercises/quiz-plan")
+async def exercises_quiz_plan(
+    body: ExerciseQuizGenerateRequest,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """返回小测题位（题型 + 知识点），不生成题干；前端可逐题 POST /exercises/generate 以边生成边展示。"""
+    plan = await _build_exercise_quiz_plan(body, current_user, db)
+    return {"plan": plan}
+
+
+@course.post("/exercises/generate-quiz")
+async def exercises_generate_quiz(
+    body: ExerciseQuizGenerateRequest,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """生成小测：一次生成多题（多种题型 + 数量）。知识点支持可选集合；未选时默认个性化抽取。"""
+
+    slots = await _build_exercise_quiz_plan(body, current_user, db)
+
+    questions: list[dict] = []
+    for slot in slots:
+        out = await generate_question(
+            slot["question_type"],
+            slot["knowledge_point"],
+            chapter=body.chapter,
+            section_id=slot.get("section_id"),
+            db=db,
+            stats_user_id=current_user.id,
+        )
+        out["knowledge_point_id"] = slot["knowledge_point_id"]
+        out["knowledge_point"] = slot["knowledge_point"]
         questions.append(out)
 
     return {"questions": questions}
@@ -784,6 +932,8 @@ async def exercises_submit(
             correct_answer=body.correct_answer,
             scoring_points=body.scoring_points or [],
             user_answer=body.user_answer.strip(),
+            db=db,
+            stats_user_id=current_user.id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

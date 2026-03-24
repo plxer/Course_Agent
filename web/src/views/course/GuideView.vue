@@ -8,9 +8,9 @@
         <div class="guide-right">
           <div class="guide-nav">
             <router-link to="/conversation" class="guide-nav-link" :class="{ active: $route.path === '/conversation' || $route.path === '/course' }">对话</router-link>
-            <router-link to="/exercises" class="guide-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
             <router-link to="/reading" class="guide-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
             <router-link to="/videos" class="guide-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
+            <router-link to="/exercises" class="guide-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
             <router-link to="/mall" class="guide-nav-link" :class="{ active: $route.path === '/mall' }">积分商城</router-link>
             <router-link v-if="userStore.isAdmin" to="/ops" class="guide-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
             <router-link to="/guide" class="guide-nav-link" :class="{ active: $route.path === '/guide' }">使用指南</router-link>
@@ -34,7 +34,7 @@
       <div class="guide-title-section">
         <h1 class="guide-title">使用指南</h1>
         <p class="guide-subtitle">
-          本平台为天津大学《计算机网络》课程数智化学习平台，提供对话答疑、习题推荐、课本伴读、视频学习与积分商城等功能，帮助您更好地掌握课程内容。
+          本平台为天津大学《计算机网络》课程数智化学习平台，提供对话答疑、课本伴读、视频学习、习题推荐与积分商城等功能，帮助您更好地掌握课程内容。
         </p>
       </div>
 
@@ -49,11 +49,6 @@
       </section>
 
       <section class="guide-section">
-        <h2 class="guide-section-title">习题推荐</h2>
-        <p class="guide-section-p">「习题推荐」根据您的学习情况推荐练习题。答对题目可获得积分，积分可用于积分商城兑换称号。支持错题分析，帮助您针对薄弱知识点加强练习。</p>
-      </section>
-
-      <section class="guide-section">
         <h2 class="guide-section-title">课本伴读</h2>
         <p class="guide-section-p">「课本伴读」提供与教材对应的智能伴读。选择教材后可按章节阅读，在阅读过程中可随时向智能体提问当前页或相关知识点，便于边读边问、加深理解。</p>
       </section>
@@ -61,6 +56,11 @@
       <section class="guide-section">
         <h2 class="guide-section-title">视频</h2>
         <p class="guide-section-p">「视频」页面按课程章节组织视频资源。选择章节后即可观看对应讲解视频，适合配合课本与习题巩固学习。</p>
+      </section>
+
+      <section class="guide-section">
+        <h2 class="guide-section-title">习题推荐</h2>
+        <p class="guide-section-p">「习题推荐」根据您的学习情况推荐练习题。答对题目可获得积分，积分可用于积分商城兑换称号。支持错题分析，帮助您针对薄弱知识点加强练习。</p>
       </section>
 
       <section class="guide-section">

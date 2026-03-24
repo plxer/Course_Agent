@@ -98,7 +98,16 @@ export async function apiRequest(url, options = {}, requiresAuth = true, respons
       } else if (response.status === 403) {
         throw new Error('没有权限执行此操作')
       } else if (response.status === 500) {
-        throw new Error('服务器内部错误，请使用 docker logs api-dev 查看详细日志')
+        const d = errorData?.detail
+        const fromDetail =
+          typeof d === 'string'
+            ? d
+            : Array.isArray(d)
+              ? d.map((x) => (typeof x === 'object' && x != null ? x.msg || JSON.stringify(x) : String(x))).join('; ')
+              : ''
+        throw new Error(
+          fromDetail || '服务器内部错误，请使用 docker logs api-dev 查看详细日志'
+        )
       }
 
       throw new Error(errorMessage)

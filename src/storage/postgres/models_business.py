@@ -550,7 +550,7 @@ class ExerciseAttempt(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    question_type = Column(String(32), nullable=False, index=True)  # choice / fill / short_answer
+    question_type = Column(String(32), nullable=False, index=True)  # choice / multi_choice / short_answer / calculation
     knowledge_point = Column(String(255), nullable=False, index=True)  # 知识点
     question_content = Column(Text, nullable=False)
     correct_answer = Column(Text, nullable=False)

@@ -22,6 +22,56 @@ from src.utils.datetime_utils import utc_isoformat
 MILVUS_AVAILABLE = True
 
 
+def _milvus_schema_field_names(collection: Collection) -> set[str]:
+    return {f.name for f in collection.schema.fields}
+
+
+def _milvus_build_insert_rows(collection: Collection, chunks: list[dict], embeddings: list) -> list:
+    """按当前集合 schema 列顺序构造 insert 数据（兼容无 book_page 的旧集合）。"""
+    rows = []
+    for field in collection.schema.fields:
+        fn = field.name
+        if fn == "id":
+            rows.append([c["id"] for c in chunks])
+        elif fn == "content":
+            rows.append([c["content"] for c in chunks])
+        elif fn == "source":
+            rows.append([c["source"] for c in chunks])
+        elif fn == "chunk_id":
+            rows.append([c["chunk_id"] for c in chunks])
+        elif fn == "file_id":
+            rows.append([c["file_id"] for c in chunks])
+        elif fn == "chunk_index":
+            rows.append([c["chunk_index"] for c in chunks])
+        elif fn == "book_page":
+            rows.append([int(c.get("book_page", -1)) for c in chunks])
+        elif fn == "embedding":
+            rows.append(embeddings)
+        else:
+            raise ValueError(f"Unexpected Milvus collection field: {fn}")
+    return rows
+
+
+def _milvus_query_output_fields(collection: Collection) -> list[str]:
+    names = _milvus_schema_field_names(collection)
+    out = ["content", "source", "chunk_id", "file_id", "chunk_index"]
+    if "book_page" in names:
+        out.append("book_page")
+    return out
+
+
+def _milvus_hit_metadata(entity: dict, has_book_page_field: bool) -> dict:
+    metadata = {
+        "source": entity.get("source", "未知来源"),
+        "chunk_id": entity.get("chunk_id"),
+        "file_id": entity.get("file_id"),
+        "chunk_index": entity.get("chunk_index"),
+    }
+    if has_book_page_field:
+        metadata["book_page"] = entity.get("book_page", -1)
+    return metadata
+
+
 class MilvusKB(KnowledgeBase):
     """基于 Milvus 的生产级向量库"""
 
@@ -146,6 +196,7 @@ class MilvusKB(KnowledgeBase):
             FieldSchema(name="chunk_id", dtype=DataType.VARCHAR, max_length=100),
             FieldSchema(name="file_id", dtype=DataType.VARCHAR, max_length=100),
             FieldSchema(name="chunk_index", dtype=DataType.INT64),
+            FieldSchema(name="book_page", dtype=DataType.INT64),
             FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=embedding_dim),
         ]
 
@@ -308,18 +359,10 @@ class MilvusKB(KnowledgeBase):
                 texts = [chunk["content"] for chunk in chunks]
                 embeddings = await embedding_function(texts)
 
-                entities = [
-                    [chunk["id"] for chunk in chunks],
-                    [chunk["content"] for chunk in chunks],
-                    [chunk["source"] for chunk in chunks],
-                    [chunk["chunk_id"] for chunk in chunks],
-                    [chunk["file_id"] for chunk in chunks],
-                    [chunk["chunk_index"] for chunk in chunks],
-                    embeddings,
-                ]
-
                 # Clean up existing chunks if any (for re-indexing)
                 await self.delete_file_chunks_only(db_id, file_id)
+
+                entities = _milvus_build_insert_rows(collection, chunks, embeddings)
 
                 def _insert_records():
                     collection.insert(entities)
@@ -411,15 +454,7 @@ class MilvusKB(KnowledgeBase):
                     texts = [chunk["content"] for chunk in chunks]
                     embeddings = await embedding_function(texts)
 
-                    entities = [
-                        [chunk["id"] for chunk in chunks],
-                        [chunk["content"] for chunk in chunks],
-                        [chunk["source"] for chunk in chunks],
-                        [chunk["chunk_id"] for chunk in chunks],
-                        [chunk["file_id"] for chunk in chunks],
-                        [chunk["chunk_index"] for chunk in chunks],
-                        embeddings,
-                    ]
+                    entities = _milvus_build_insert_rows(collection, chunks, embeddings)
 
                     def _insert_records():
                         collection.insert(entities)
@@ -500,6 +535,8 @@ class MilvusKB(KnowledgeBase):
                 logger.debug(f"Using filter expression: {file_expr}")
 
             vector_results: list[dict] = []
+            query_output_fields = _milvus_query_output_fields(collection)
+            has_book_page = "book_page" in _milvus_schema_field_names(collection)
             if search_mode in {"vector", "hybrid"}:
                 embed_info = self.databases_meta[db_id].get("embed_info", {})
                 embedding_function = self._get_embedding_function(embed_info)
@@ -513,7 +550,7 @@ class MilvusKB(KnowledgeBase):
                     param=search_params,
                     limit=recall_top_k,
                     expr=file_expr,
-                    output_fields=["content", "source", "chunk_id", "file_id", "chunk_index"],
+                    output_fields=query_output_fields,
                 )
 
                 if results and len(results) > 0 and len(results[0]) > 0:
@@ -523,12 +560,7 @@ class MilvusKB(KnowledgeBase):
                             continue
 
                         entity = hit.entity
-                        metadata = {
-                            "source": entity.get("source", "未知来源"),
-                            "chunk_id": entity.get("chunk_id"),
-                            "file_id": entity.get("file_id"),
-                            "chunk_index": entity.get("chunk_index"),
-                        }
+                        metadata = _milvus_hit_metadata(entity, has_book_page)
 
                         chunk = {"content": entity.get("content", ""), "metadata": metadata, "score": similarity}
                         if include_distances:
@@ -558,7 +590,7 @@ class MilvusKB(KnowledgeBase):
 
                     results = collection.query(
                         expr=keyword_expr,
-                        output_fields=["content", "source", "chunk_id", "file_id", "chunk_index"],
+                        output_fields=query_output_fields,
                         limit=keyword_top_k,
                     )
 
@@ -570,12 +602,7 @@ class MilvusKB(KnowledgeBase):
                         if match_count <= 0:
                             continue
 
-                        metadata = {
-                            "source": result.get("source", "未知来源"),
-                            "chunk_id": result.get("chunk_id"),
-                            "file_id": result.get("file_id"),
-                            "chunk_index": result.get("chunk_index"),
-                        }
+                        metadata = _milvus_hit_metadata(result, has_book_page)
                         keyword_scores.append((result, metadata, match_count))
 
                     if keyword_scores:
@@ -724,9 +751,12 @@ class MilvusKB(KnowledgeBase):
             try:
                 # 查询文档的所有chunks
                 expr = f'file_id == "{file_id}"'
+                fc_fields = ["content", "chunk_id", "chunk_index"]
+                if "book_page" in _milvus_schema_field_names(collection):
+                    fc_fields.append("book_page")
                 results = collection.query(
                     expr=expr,
-                    output_fields=["content", "chunk_id", "chunk_index"],
+                    output_fields=fc_fields,
                     limit=10000,  # 假设单个文件不会超过10000个chunks
                 )
 
@@ -738,6 +768,8 @@ class MilvusKB(KnowledgeBase):
                         "content": result.get("content", ""),
                         "chunk_order_index": result.get("chunk_index", 0),
                     }
+                    if "book_page" in fc_fields:
+                        chunk_data["book_page"] = result.get("book_page", -1)
                     doc_chunks.append(chunk_data)
 
                 # 按 chunk_order_index 排序

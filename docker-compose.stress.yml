@@ -1,0 +1,10 @@
+# 压测或长时间批跑时使用：关闭 api 的 --reload，避免保存代码触发 Worker 重启，
+# 从而取消正在进行的流式请求并产生 CancelledError / asyncpg 关闭超时等噪音。
+#
+# 用法:
+#   docker compose -f docker-compose.yml -f docker-compose.stress.yml up -d
+# 恢复开发热重载:
+#   docker compose up -d
+services:
+  api:
+    command: uv run --no-dev uvicorn server.main:app --host 0.0.0.0 --port 5050

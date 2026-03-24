@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import Integer, String, cast, distinct, func, or_, select, text
+from sqlalchemy import Integer, String, cast, distinct, func, not_, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.routers.auth_router import get_admin_user
@@ -151,6 +151,8 @@ async def get_all_conversations(
             .outerjoin(ConversationStats, Conversation.id == ConversationStats.conversation_id)
             .outerjoin(User, user_join)
         )
+        # 习题推荐出题/批改、相关性判断、课本翻译等为运维 Token 统计写入的伪会话（thread_id 以 course_aux_ 开头），不是用户聊天
+        query = query.filter(not_(Conversation.thread_id.startswith("course_aux_")))
 
         # Apply filters（用户筛选：以输入内容开头的用户，匹配 conversation.user_id 或关联的 User.user_id / User.id）
         if user_id and user_id.strip():

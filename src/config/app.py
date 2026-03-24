@@ -557,5 +557,10 @@ class Config(BaseModel):
             logger.error(f"Failed to save custom providers to {custom_config_file}: {e}")
 
 
+def course_reading_paddle_ocr_enabled() -> bool:
+    """课本伴读选区是否在 RapidOCR 之后启用 Paddle（默认关，减轻容器内存与预热负担）。"""
+    return os.environ.get("COURSE_READING_ENABLE_PADDLE_OCR", "").strip().lower() in ("1", "true", "yes")
+
+
 # 全局配置实例
 config = Config()

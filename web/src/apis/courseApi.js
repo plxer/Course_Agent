@@ -180,6 +180,20 @@ export function exerciseQuizGenerate({ chapter, question_type_counts, knowledge_
   )
 }
 
+/** 小测题位：仅返回题型+知识点列表（不调用 LLM），供前端逐题 exerciseGenerate 边生成边展示 */
+export function exerciseQuizPlan({ chapter, question_type_counts, knowledge_point_ids = [] }) {
+  return apiPost(
+    '/api/course/exercises/quiz-plan',
+    {
+      chapter,
+      question_type_counts,
+      knowledge_point_ids
+    },
+    {},
+    true
+  )
+}
+
 /** 提交答案 */
 export function exerciseSubmit(payload) {
   return apiPost('/api/course/exercises/submit', payload, {}, true)

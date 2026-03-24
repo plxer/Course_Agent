@@ -117,7 +117,7 @@ test = [
     "pytest-httpx>=0.32.0",
     "pytest-cov>=6.0.0",
 ]
-# 课本伴读选区 OCR 高精度：安装后优先使用 PaddleOCR（uv sync --group paddle）
+# 课本伴读选区 OCR 回退：PaddleOCR（uv sync --group paddle）；伴读选区默认先用 RapidOCR
 # 3.x 需配合 langchain.docstore 兼容层（见 paddle_ocr_processor）
 paddle = [
     "paddlepaddle>=2.5.0",

@@ -1,5 +1,6 @@
 """PostgreSQL 数据库管理器 - 支持知识库和业务数据"""
 
+import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
@@ -50,11 +51,18 @@ class PostgresManager(metaclass=SingletonMeta):
             return
 
         try:
+            # 连接池：流式对话整条响应期间占用会话；约 50 人同时提问需预留 50+ 连接及登录等开销
+            pool_size = int(os.getenv("POSTGRES_POOL_SIZE", "32"))
+            max_overflow = int(os.getenv("POSTGRES_MAX_OVERFLOW", "48"))
+            pool_timeout = int(os.getenv("POSTGRES_POOL_TIMEOUT", "60"))
             # 创建异步 SQLAlchemy 引擎
             self.async_engine = create_async_engine(
                 db_url,
                 json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
                 json_deserializer=json.loads,
+                pool_size=pool_size,
+                max_overflow=max_overflow,
+                pool_timeout=pool_timeout,
                 pool_pre_ping=True,
                 pool_recycle=1800,
             )
@@ -67,7 +75,13 @@ class PostgresManager(metaclass=SingletonMeta):
             )
 
             self._initialized = True
-            logger.info(f"PostgreSQL manager initialized for knowledge base: {db_url.split('@')[0]}://***")
+            logger.info(
+                "PostgreSQL manager initialized ({}://***), pool_size={} max_overflow={} pool_timeout={}",
+                db_url.split("@")[0],
+                pool_size,
+                max_overflow,
+                pool_timeout,
+            )
         except Exception as e:
             logger.error(f"Failed to initialize PostgreSQL manager: {e}")
             # 不抛出异常，允许应用启动，但在使用时会报错
@@ -211,9 +225,21 @@ class PostgresManager(metaclass=SingletonMeta):
             await session.close()
 
     async def close(self):
-        """关闭引擎"""
-        if self.async_engine:
-            await self.async_engine.dispose()
+        """关闭引擎（应用 shutdown / Uvicorn 热重载退出 Worker 时调用）。"""
+        if not self.async_engine:
+            return
+        engine = self.async_engine
+        self.async_engine = None
+        self.AsyncSession = None
+        self._initialized = False
+        try:
+            await asyncio.wait_for(engine.dispose(), timeout=30.0)
+        except TimeoutError:
+            logger.warning(
+                "PostgreSQL engine dispose timed out; remaining asyncpg closes may log in the worker"
+            )
+        except Exception as e:
+            logger.warning("PostgreSQL engine dispose failed: {}", e)
 
     async def async_check_first_run(self):
         """检查是否首次运行（异步版本）- 检查用户表是否有数据"""

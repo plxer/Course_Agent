@@ -602,7 +602,10 @@ async def stream_agent_chat(
         )
 
     except (asyncio.CancelledError, ConnectionError) as e:
-        logger.warning(f"Client disconnected, cancelling stream: {e}")
+        if isinstance(e, asyncio.CancelledError):
+            logger.debug("Stream cancelled (client disconnect or worker shutdown): {}", e)
+        else:
+            logger.warning("Client connection error, ending stream: {}", e)
 
         async def save_cleanup():
             nonlocal full_msg

@@ -247,10 +247,17 @@ async def test_all_embedding_models_status() -> dict:
     }
 
 
+# 同一 model_id 复用实例，避免每次向量检索都 new 并刷「Loading embedding model」日志
+_embedding_instances: dict[str, BaseEmbeddingModel] = {}
+
+
 def select_embedding_model(model_id):
     provider, model_name = model_id.split("/", 1) if model_id else ("", "")
     support_embed_models = config.embed_model_names.keys()
     assert model_id in support_embed_models, f"Unsupported embed model: {model_id}, only support {support_embed_models}"
+    cached = _embedding_instances.get(model_id)
+    if cached is not None:
+        return cached
     logger.info(f"Loading embedding model {model_id}")
     if provider == "local":
         raise ValueError("Local embedding model is not supported, please use other embedding models")
@@ -263,4 +270,5 @@ def select_embedding_model(model_id):
     else:
         model = OtherEmbedding(**embed_config)
 
+    _embedding_instances[model_id] = model
     return model

@@ -13,7 +13,10 @@ WORKDIR /app
 ENV TZ=Asia/Shanghai \
     UV_PROJECT_ENVIRONMENT="/usr/local" \
     UV_COMPILE_BYTECODE=1 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    FLAGS_use_mkldnn=0 \
+    FLAGS_use_onednn=0 \
+    PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT=0
 
 RUN npm install -g npm@latest && npm cache clean --force
 

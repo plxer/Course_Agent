@@ -138,6 +138,22 @@ models = [
 ]
 ```
 
+### PostgreSQL 连接池（`POSTGRES_URL`）
+
+业务库使用 SQLAlchemy 异步连接池。流式对话等接口会在**整条响应结束前**一直占用请求级 `AsyncSession`，并发路数多时默认池子（历史上等价于 5 + 10 溢出）容易报 `QueuePool ... timeout`。
+
+可通过环境变量调整（**单进程**内最大连接数约为 `POSTGRES_POOL_SIZE + POSTGRES_MAX_OVERFLOW`，多 worker 时按进程倍增，需小于 PostgreSQL 的 `max_connections`）：
+
+| 变量 | 默认 | 含义 |
+|------|------|------|
+| `POSTGRES_POOL_SIZE` | `32` | 池中常驻连接数 |
+| `POSTGRES_MAX_OVERFLOW` | `48` | 超出常驻后允许的临时连接上限（与上一行合计约 80，便于 ~50 人同时流式提问 + 其它 API） |
+| `POSTGRES_POOL_TIMEOUT` | `60` | 取连接等待秒数 |
+
+`docker-compose.yml` / `docker-compose.prod.yml` 已传入上述变量，可在 `.env` 中覆盖。更高并发时继续调大上述两项，并确认 PostgreSQL `max_connections` 大于 **单 API 进程** `(POOL_SIZE + MAX_OVERFLOW) × worker 数`。
+
+开发环境默认 `api` 使用 Uvicorn `--reload`；**压测或长流式请求**时若同时改代码触发重载，会取消进行中的请求并产生大量 `CancelledError` / 连接池关闭噪音。此时可叠加 `docker-compose.stress.yml` 关闭热重载：`docker compose -f docker-compose.yml -f docker-compose.stress.yml up -d`。
+
 ## 高级配置
 
 ### 动态配置更新

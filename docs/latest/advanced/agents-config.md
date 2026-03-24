@@ -274,6 +274,8 @@ tools = await get_enabled_mcp_tools("sequentialthinking")
 
 系统首次启动时，会加载 `src/services/mcp_service.py` 中 `_DEFAULT_MCP_SERVERS` 定义的默认服务器（如 `sequentialthinking` 和 `mcp-server-chart`）到数据库中。后续的修改将以数据库为准。
 
+**远程 MCP 连接超时（`ConnectTimeout` / `sequentialthinking`）**：该默认服务依赖公网 `remote.mcpservers.org`，在 Docker、内网或境外不可达时无法连接。新版本默认将 `sequentialthinking` **禁用**（仅对新写入库的记录生效）。若库中早已启用，请在 **系统设置 → MCP 服务器** 中关闭 `sequentialthinking`，或对 PostgreSQL 执行：`UPDATE mcp_servers SET enabled = 0 WHERE name = 'sequentialthinking';`，然后重启 API。
+
 ### MySQL 数据库
 
 在 数据库报表助手（SqlReporterAgent） 中，可以通过配置下面环境变量，让 Agent 能够连接到 MySQL 数据库。并通过执行 SQL 查询，获取数据库中的数据。

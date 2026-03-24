@@ -101,6 +101,8 @@ async def main():
                 "content_type": "file",
                 "chunk_size": 1000,
                 "chunk_overlap": 200,
+                # 课本 MD 含 ![](_page_<印刷页码>_...) 插图路径，先按锚点分段再按长度切分
+                "page_anchor_split": True,
             },
             operator_id=None,
         )

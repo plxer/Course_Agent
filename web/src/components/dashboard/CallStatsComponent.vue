@@ -70,8 +70,8 @@ const timeRangeOptions = [
   { value: '14weeks', label: '近14周' }
 ]
 const dataTypeOptions = [
-  { value: 'models', label: '模型调用' },
   { value: 'agents', label: '智能体调用' },
+  { value: 'models', label: '模型调用' },
   { value: 'tokens', label: 'Token消耗' },
   { value: 'tools', label: '工具调用' }
 ]
@@ -167,6 +167,11 @@ const renderCallStatsChart = () => {
   const data = callStatsData.value.data || []
   const categories = callStatsData.value.categories || []
 
+  // 整个时间范围内从未出现过的类别（全为 0）不进入图例与系列，避免无效条目
+  const activeCategories = categories.filter((cat) =>
+    data.some((item) => Number(item.data?.[cat] ?? 0) > 0)
+  )
+
   const xAxisData = data.map((item) => {
     const date = item.date
     if (callTimeRange.value === '14hours') {
@@ -178,12 +183,24 @@ const renderCallStatsChart = () => {
     }
   })
 
-  const series = categories.map((category, index) => ({
-    name: category === 'None' ? '未知模型' : category,
+  const displayName = (category) => {
+    if (category === 'None') return '未知模型'
+    if (category === 'unknown_model') return '未知模型'
+    if (category === 'unknown_agent') return '未知智能体'
+    if (category === 'unknown_tool') return '未知工具'
+    return category
+  }
+
+  const series = activeCategories.map((category, index) => ({
+    name: displayName(category),
     type: 'bar',
     stack: 'total',
     emphasis: { focus: 'series' },
-    data: data.map((item) => item.data[category] || 0),
+    // 当日为 0 时不参与堆叠（'-'），该日在图/提示中相当于不展示该条目
+    data: data.map((item) => {
+      const v = Number(item.data?.[category] ?? 0)
+      return v > 0 ? v : '-'
+    }),
     itemStyle: {
       color: getColorByIndex(index),
       borderRadius: 0
@@ -224,26 +241,34 @@ const renderCallStatsChart = () => {
       textStyle: { color: getCSSVariable('--gray-600'), fontSize: 12 },
       formatter: (params) => {
         if (!params?.length) return ''
-        let total = 0
-        let result = `${params[0].name}<br/>`
-        params.forEach((param) => {
-          total += param.value
-          const truncatedName = truncateLegend(param.seriesName)
-          result += `<span style=\"display:inline-block;margin-right:5px;border-radius:10px;width:10px;height:10px;background-color:${param.color}\"></span>`
-          result += `${truncatedName}: ${formatValueForDisplay(param.value)}<br/>`
-        })
         const labelMap = {
           models: '模型调用',
           agents: '智能体调用',
           tokens: 'Token消耗',
           tools: '工具调用'
         }
-        const formattedTotal = formatValueForDisplay(total)
+        const dayIdx = params[0].dataIndex
+        const day = data[dayIdx]
+        const dayTotal = day?.data
+          ? Object.values(day.data).reduce((s, n) => s + (Number(n) || 0), 0)
+          : 0
+        // 仅列出当日次数 &gt; 0 的条目（与其它日是否出现过无关）
+        const filtered = params.filter((param) => {
+          const v = param.value
+          return typeof v === 'number' && !Number.isNaN(v) && v > 0
+        })
+        let result = `${params[0].name}<br/>`
+        filtered.forEach((param) => {
+          const truncatedName = truncateLegend(param.seriesName)
+          result += `<span style=\"display:inline-block;margin-right:5px;border-radius:10px;width:10px;height:10px;background-color:${param.color}\"></span>`
+          result += `${truncatedName}: ${formatValueForDisplay(param.value)}<br/>`
+        })
+        const formattedTotal = formatValueForDisplay(dayTotal)
         return `<div style=\"font-weight:bold;margin-bottom:5px\">${labelMap[callDataType.value]}</div>${result}<strong>总计: ${formattedTotal}</strong>`
       }
     },
     legend: {
-      data: categories.map((cat) => (cat === 'None' ? '未知模型' : cat)),
+      data: activeCategories.map((cat) => displayName(cat)),
       bottom: 5 /* 调整图例位置，从0改为5 */,
       textStyle: { color: getCSSVariable('--gray-500'), fontSize: 12 },
       itemWidth: 14,

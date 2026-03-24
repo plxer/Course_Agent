@@ -28,6 +28,10 @@ services:
       - HOST_IP=${HOST_IP:-}
       - DEFAULT_AGENT_ID=${DEFAULT_AGENT_ID:-ChatbotAgent}
       - POSTGRES_URL=${POSTGRES_URL:-postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-yuxi_know}}
+      # 异步 SQLAlchemy 连接池（长连接流式接口会占满池子，压测时可再调大，需小于 Postgres max_connections）
+      - POSTGRES_POOL_SIZE=${POSTGRES_POOL_SIZE:-32}
+      - POSTGRES_MAX_OVERFLOW=${POSTGRES_MAX_OVERFLOW:-48}
+      - POSTGRES_POOL_TIMEOUT=${POSTGRES_POOL_TIMEOUT:-60}
       - NEO4J_URI=${NEO4J_URI:-bolt://graph:7687}
       - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-0123456789}
@@ -40,6 +44,12 @@ services:
       - MINIO_URI=${MINIO_URI:-http://milvus-minio:9000}
       - MODEL_DIR_IN_DOCKER=/models
       - RUNNING_IN_DOCKER=true
+      # Paddle 课本伴读 OCR：PaddleX 默认 CPU 开 MKLDNN 会触发 onednn_instruction 崩溃，须关
+      - FLAGS_use_mkldnn=0
+      - FLAGS_use_onednn=0
+      - PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT=0
+      # 课本伴读选区默认不加载 Paddle（减负担）；需要 Rapid 之后的 Paddle 回退时设为 1
+      # - COURSE_READING_ENABLE_PADDLE_OCR=1
       - NO_PROXY=localhost,127.0.0.1,milvus,graph,milvus-minio,milvus-etcd-dev,etcd,minio,mineru,paddlex,api.siliconflow.cn
       - no_proxy=localhost,127.0.0.1,milvus,graph,milvus-minio,milvus-etcd-dev,etcd,minio,mineru,paddlex,api.siliconflow.cn
     # endregion api_envs

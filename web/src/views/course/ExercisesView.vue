@@ -8,9 +8,9 @@
         <div class="exercises-right">
           <div class="exercises-nav">
             <router-link to="/conversation" class="exercises-nav-link" :class="{ active: $route.path === '/conversation' || $route.path === '/course' }">对话</router-link>
-            <router-link to="/exercises" class="exercises-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
             <router-link to="/reading" class="exercises-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
             <router-link to="/videos" class="exercises-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
+            <router-link to="/exercises" class="exercises-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
             <router-link to="/mall" class="exercises-nav-link" :class="{ active: $route.path === '/mall' }">积分商城</router-link>
             <router-link v-if="userStore.isAdmin" to="/ops" class="exercises-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
             <router-link to="/guide" class="exercises-nav-link" :class="{ active: $route.path === '/guide' }">使用指南</router-link>
@@ -60,11 +60,11 @@
               <span class="exercises-type-option-label">{{ t.label }}</span>
             </label>
             <input
+              v-if="questionTypeCounts[t.value] > 0"
               class="exercises-type-qty-input"
               type="number"
               min="1"
               step="1"
-              :disabled="questionTypeCounts[t.value] === 0"
               v-model.number="questionTypeCounts[t.value]"
               @change="onQuestionTypeQtyChange(t.value)"
             />
@@ -105,32 +105,35 @@
         </div>
 
         <div class="exercises-generate-row">
-          <button
-            type="button"
-            class="exercises-generate-btn"
-            :style="primaryBtnStyle"
-          :disabled="!selectedChapter || totalQuestionCount <= 0 || generating"
-            @click="doGenerate"
-          >
-            {{ generating ? '生成中…' : '生成题目' }}
-          </button>
-        <button
-          type="button"
-          class="exercises-clear-quiz-btn"
-          :disabled="!quizQuestions.length || generating"
-          @click="clearQuiz"
-        >
-          清除本次小测
-        </button>
+          <div class="exercises-generate-row-left">
+            <button
+              type="button"
+              class="exercises-generate-btn"
+              :style="primaryBtnStyle"
+              :disabled="generateDisabled"
+              @click="doGenerate"
+            >
+              {{ planFetching ? '准备题单…' : quizGenerating ? '生成题目中…' : '生成题目' }}
+            </button>
+            <button
+              type="button"
+              class="exercises-clear-quiz-btn"
+              :disabled="clearQuizDisabled"
+              @click="clearQuiz"
+            >
+              清除
+            </button>
+          </div>
+          <button type="button" class="exercises-history-btn" @click="openQuizHistoryModal">历史记录</button>
         </div>
-      <p v-if="totalQuestionCount > 10" class="exercises-quiz-limit-hint">
-        本次小测最多 10 道题（将自动截断生成到 10 道）
+      <p v-if="totalQuestionCount > QUIZ_MAX_QUESTIONS" class="exercises-quiz-limit-hint">
+        每次小测最多 {{ QUIZ_MAX_QUESTIONS }} 道题，请减少各题型数量后再点击「生成题目」。
       </p>
       </section>
 
       <!-- 题目与作答 -->
-      <section v-if="currentQuestion.content" class="exercises-question-section">
-        <div class="exercises-question-card">
+      <section v-if="quizSessionActive && !quizFinished" class="exercises-question-section">
+        <div v-if="currentQuestion.content" class="exercises-question-card">
           <div v-if="currentQuestion.textbook_used" class="exercises-textbook-badge-row">
             <p class="exercises-textbook-badge">
               本题结合课本：第{{ currentQuestion.chapter }}章
@@ -148,14 +151,30 @@
                 class="exercises-option-row"
               >
                 <input
-                  :id="'opt-' + idx"
+                  :id="'opt-' + currentQuestionIndex + '-' + idx"
                   type="radio"
-                  name="q-option"
+                  :name="'q-opt-' + currentQuestionIndex"
                   :value="opt.charAt(0)"
                   v-model="userAnswer"
                   class="exercises-option-radio"
                 />
-                <label :for="'opt-' + idx" class="exercises-option-label">{{ opt }}</label>
+                <label :for="'opt-' + currentQuestionIndex + '-' + idx" class="exercises-option-label">{{ opt }}</label>
+              </div>
+            </div>
+            <div v-if="currentQuestion.question_type === 'multi_choice' && currentQuestion.options?.length" class="exercises-options">
+              <div
+                v-for="(opt, idx) in currentQuestion.options"
+                :key="'m-' + idx"
+                class="exercises-option-row"
+              >
+                <input
+                  :id="'mopt-' + currentQuestionIndex + '-' + idx"
+                  type="checkbox"
+                  :value="opt.charAt(0)"
+                  v-model="multiChoiceLetters"
+                  class="exercises-option-checkbox"
+                />
+                <label :for="'mopt-' + currentQuestionIndex + '-' + idx" class="exercises-option-label">{{ opt }}</label>
               </div>
             </div>
           </div>
@@ -163,11 +182,14 @@
             <template v-if="currentQuestion.question_type === 'choice'">
               <p class="exercises-answer-hint">请在上方选择选项后提交。</p>
             </template>
+            <template v-else-if="currentQuestion.question_type === 'multi_choice'">
+              <p class="exercises-answer-hint">请在上方勾选你认为正确的所有选项后提交（可多选）。</p>
+            </template>
             <template v-else>
               <textarea
                 v-model="userAnswer"
                 class="exercises-answer-input"
-                placeholder="请输入你的答案（仅可提交一次）"
+                :placeholder="currentQuestion.question_type === 'calculation' ? '请输入计算过程与最终结果（仅可提交一次）' : '请输入你的答案（仅可提交一次）'"
                 rows="4"
               />
             </template>
@@ -193,24 +215,36 @@
                 v-html="renderTextbookMarkdown(resultExplanation)"
               />
             </div>
-            <div class="exercises-quiz-actions">
-              <button
-                v-if="currentQuestionIndex > 0"
-                type="button"
-                class="exercises-prev-btn"
-                @click="goPrevQuestion"
-              >
-                上一题
-              </button>
-              <button type="button" class="exercises-next-btn" @click="goNextQuestion">
-                {{ currentQuestionIndex + 1 >= quizQuestions.length ? '完成小测' : '下一题' }}
-              </button>
-            </div>
           </div>
+          <div class="exercises-quiz-actions">
+            <button
+              type="button"
+              class="exercises-prev-btn"
+              :disabled="!canGoPrevQuiz"
+              @click="goPrevQuestion"
+            >
+              上一题
+            </button>
+            <button
+              type="button"
+              class="exercises-next-btn"
+              :disabled="!canGoNextQuiz"
+              @click="goNextQuestion"
+            >
+              {{ currentQuestionIndex + 1 >= quizPlan.length ? '完成小测' : '下一题' }}
+            </button>
+          </div>
+        </div>
+        <div v-else class="exercises-empty-hint exercises-generating-hint">
+          <template v-if="quizGenerating">
+            正在生成第 {{ currentQuestionIndex + 1 }} / {{ quizPlan.length }} 题…
+          </template>
+          <template v-else-if="quizQuestions.some(Boolean)">题目加载中…</template>
+          <template v-else>题目生成中断，请点击「清除」后重试。</template>
         </div>
       </section>
       <section v-else-if="quizFinished" class="exercises-empty-hint">
-        本次小测已完成。你可以修改题型数量/知识点集合后再次点击「生成题目」。
+        本次小测已完成。可直接再次点击「生成题目」开始新小测；也可在「历史记录」中打开过往小测。
       </section>
       <section v-else class="exercises-empty-hint">
         请先选择题型数量与章节，再点击「生成题目」开始练习（知识点可选）。
@@ -283,7 +317,7 @@
             <div v-for="item in wrongList" :key="item.id" class="wrong-list-item">
               <div class="wrong-item-question wrong-item-markdown" v-html="renderTextbookMarkdown(item.question_content || '')"></div>
               <p class="wrong-item-meta">
-            {{ item.question_type === 'choice' ? '选择题' : item.question_type === 'fill' ? '填空题' : '简答题' }}
+            {{ exerciseQuestionTypeLabel(item.question_type) }}
             · 知识点：{{ item.knowledge_point }}
             {{ item.section_title ? ` · ${item.section_title}` : '' }}
           </p>
@@ -305,6 +339,25 @@
         </div>
       </div>
     </a-modal>
+
+    <a-modal
+      v-model:open="quizHistoryModalVisible"
+      title="小测历史记录"
+      width="560"
+      :footer="null"
+      destroy-on-close
+    >
+      <div v-if="!quizHistoryList.length" class="exercises-history-empty">暂无历史小测。完成一次小测后会自动保存。</div>
+      <ul v-else class="exercises-history-list">
+        <li v-for="item in quizHistoryList" :key="item.id" class="exercises-history-item">
+          <div class="exercises-history-item-main">
+            <span class="exercises-history-item-title">{{ item.chapterTitle || '未知章节' }} · 共 {{ item.questionCount ?? item.quizQuestions?.length ?? 0 }} 题</span>
+            <span class="exercises-history-item-time">{{ formatQuizHistoryTime(item.savedAt) }}</span>
+          </div>
+          <button type="button" class="exercises-history-open-btn" @click="restoreQuizFromHistory(item)">打开</button>
+        </li>
+      </ul>
+    </a-modal>
   </div>
 </template>
 
@@ -317,7 +370,8 @@ import { marked } from 'marked'
 import * as echarts from 'echarts'
 import {
   getTextbookChapters,
-  exerciseQuizGenerate,
+  exerciseQuizPlan,
+  exerciseGenerate,
   exerciseSubmit,
   exerciseWrongAnalysis,
   exerciseWrongList,
@@ -334,9 +388,10 @@ const handleSwitchAccount = () => {
 }
 
 const questionTypes = [
-  { value: 'choice', label: '选择题' },
-  { value: 'fill', label: '填空题' },
-  { value: 'short_answer', label: '简答题' }
+  { value: 'choice', label: '单选题' },
+  { value: 'multi_choice', label: '多选题' },
+  { value: 'short_answer', label: '简答题' },
+  { value: 'calculation', label: '计算题' }
 ]
 
 const chapters = ref([])
@@ -344,15 +399,48 @@ const chaptersLoading = ref(true)
 const chaptersError = ref('')
 const selectedChapterId = ref(null)
 const selectedKnowledgePointIds = ref([])
-const quizQuestions = ref([])
+/** 小测题位（与后端 quiz-plan 一致），有会话时 length > 0 */
+const quizPlan = ref([])
+const quizQuestions = ref([]) // 与 plan 等长；未生成的题为 null
 const quizSubmissions = ref([]) // 每题是否已提交 + 判题结果，用于支持返回上一题
+const quizDraftAnswers = ref([]) // 未提交时的作答草稿，与题序对齐
 const currentQuestionIndex = ref(0)
 const quizFinished = ref(false)
+const planFetching = ref(false)
+const quizGenerating = ref(false)
+const quizGenerationCancelled = ref(false)
 const questionTypeCounts = ref({
   choice: 0,
-  fill: 0,
-  short_answer: 0
+  multi_choice: 0,
+  short_answer: 0,
+  calculation: 0
 })
+
+const DEFAULT_TYPE_COUNTS = () => ({
+  choice: 0,
+  multi_choice: 0,
+  short_answer: 0,
+  calculation: 0
+})
+
+function parseMultiChoiceLetters(s) {
+  return [...new Set(String(s || '').toUpperCase().match(/[A-D]/g) || [])].sort()
+}
+
+function formatMultiChoiceAnswer(s) {
+  return parseMultiChoiceLetters(s).join(',')
+}
+
+function exerciseQuestionTypeLabel(t) {
+  const m = {
+    choice: '单选题',
+    multi_choice: '多选题',
+    short_answer: '简答题',
+    calculation: '计算题',
+    fill: '填空题'
+  }
+  return m[t] || t || '—'
+}
 const selectedChapter = computed(() => {
   if (selectedChapterId.value == null) return null
   return chapters.value.find((c) => String(c.id) === String(selectedChapterId.value)) ?? null
@@ -407,7 +495,6 @@ function renderTextbookMarkdown(text) {
     return text.replace(/</g, '&lt;').replace(/>/g, '&gt;')
   }
 }
-const generating = ref(false)
 const EMPTY_QUESTION = {
   content: '',
   correct_answer: '',
@@ -423,16 +510,51 @@ const EMPTY_QUESTION = {
 }
 const currentQuestion = ref({ ...EMPTY_QUESTION })
 const userAnswer = ref('')
+/** 多选题勾选状态，与 userAnswer（如 A,C）同步 */
+const multiChoiceLetters = ref([])
 const submitted = ref(false)
 const submitting = ref(false)
 const resultCorrect = ref(false)
 const resultExplanation = ref('')
+
+const quizSessionActive = computed(() => quizPlan.value.length > 0)
+
+const QUIZ_MAX_QUESTIONS = 10
+
+const generateDisabled = computed(
+  () =>
+    !selectedChapter.value ||
+    totalQuestionCount.value <= 0 ||
+    totalQuestionCount.value > QUIZ_MAX_QUESTIONS ||
+    planFetching.value ||
+    quizGenerating.value ||
+    (quizPlan.value.length > 0 && !quizFinished.value)
+)
+
+const clearQuizDisabled = computed(() => !quizSessionActive.value && !quizQuestions.value.some(Boolean))
+
+const canGoPrevQuiz = computed(
+  () => currentQuestionIndex.value > 0 && Boolean(currentQuestion.value.content)
+)
+
+const canGoNextQuiz = computed(() => {
+  if (!currentQuestion.value.content) return false
+  const idx = currentQuestionIndex.value
+  const next = quizQuestions.value[idx + 1]
+  if (idx + 1 >= quizQuestions.value.length) return true
+  // 下一题必须已生成完成（有题干），避免未出完时误点「下一题」
+  return Boolean(next && String(next.content || '').trim())
+})
+
 const pointsDisplay = computed(() => userStore.userPoints === null ? '—' : (userStore.userPoints ?? 0))
 const currentUserLabel = computed(() => userStore.username || userStore.userIdLogin || '当前用户')
 
 const canSubmit = computed(() => {
   if (currentQuestion.value.question_type === 'choice') {
     return ['A', 'B', 'C', 'D'].includes(String(userAnswer.value).trim().toUpperCase())
+  }
+  if (currentQuestion.value.question_type === 'multi_choice') {
+    return parseMultiChoiceLetters(userAnswer.value).length > 0
   }
   return String(userAnswer.value).trim().length > 0
 })
@@ -476,6 +598,72 @@ const wrongDebugTableTotal = ref(null) // 无数据时后端返回的 exercise_a
 const wrongPage = ref(1)
 const pageSize = 20
 
+const QUIZ_HISTORY_MAX = 20
+const quizHistoryModalVisible = ref(false)
+const quizHistoryList = ref([])
+/** 从历史打开后，再点「完成小测」不重复写入历史 */
+const suppressQuizHistoryAppend = ref(false)
+
+function getQuizHistoryStorageKey() {
+  const login = String(userStore.userIdLogin || '').trim()
+  return `course_exercises_quiz_history_v1_${login || 'anon'}`
+}
+
+function readQuizHistoryListRaw() {
+  try {
+    const raw = localStorage.getItem(getQuizHistoryStorageKey())
+    if (!raw) return []
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr) ? arr : []
+  } catch (_) {
+    return []
+  }
+}
+
+function writeQuizHistoryListRaw(list) {
+  try {
+    localStorage.setItem(getQuizHistoryStorageKey(), JSON.stringify(list.slice(0, QUIZ_HISTORY_MAX)))
+  } catch (_) {}
+}
+
+function formatQuizHistoryTime(iso) {
+  try {
+    return new Date(iso).toLocaleString('zh-CN', { hour12: false })
+  } catch {
+    return ''
+  }
+}
+
+function openQuizHistoryModal() {
+  quizHistoryList.value = readQuizHistoryListRaw()
+  quizHistoryModalVisible.value = true
+}
+
+function appendQuizHistory() {
+  const n = quizQuestions.value.length
+  if (!n || !quizPlan.value.length) return
+  const ch = selectedChapter.value
+  const snapshot = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    savedAt: new Date().toISOString(),
+    chapterTitle: ch?.title || (selectedChapterId.value != null ? `第${selectedChapterId.value}章` : ''),
+    chapterId: selectedChapterId.value,
+    questionTypeCounts: JSON.parse(JSON.stringify(questionTypeCounts.value)),
+    selectedKnowledgePointIds: [...selectedKnowledgePointIds.value],
+    quizPlan: JSON.parse(JSON.stringify(quizPlan.value)),
+    quizQuestions: JSON.parse(JSON.stringify(quizQuestions.value)),
+    quizSubmissions: JSON.parse(JSON.stringify(quizSubmissions.value)),
+    quizDraftAnswers: [...quizDraftAnswers.value],
+    currentQuestionIndex: currentQuestionIndex.value,
+    quizFinished: true,
+    questionCount: n
+  }
+  const list = readQuizHistoryListRaw()
+  list.unshift(snapshot)
+  writeQuizHistoryListRaw(list)
+  quizHistoryList.value = readQuizHistoryListRaw()
+}
+
 async function loadPoints() {
   if (!userStore.isLoggedIn) return
   try {
@@ -492,9 +680,12 @@ function getQuizStorageKey() {
 function saveQuizState() {
   try {
     const payload = {
+      quizVersion: 2,
       chapterId: selectedChapterId.value,
       questionTypeCounts: questionTypeCounts.value,
       selectedKnowledgePointIds: selectedKnowledgePointIds.value,
+      quizPlan: quizPlan.value,
+      quizDraftAnswers: quizDraftAnswers.value,
       quizQuestions: quizQuestions.value,
       quizSubmissions: quizSubmissions.value,
       currentQuestionIndex: currentQuestionIndex.value,
@@ -509,103 +700,260 @@ function saveQuizState() {
 function syncCurrentQuestionUI() {
   const idx = currentQuestionIndex.value
   const q = quizQuestions.value[idx]
-  currentQuestion.value = q ? q : { ...EMPTY_QUESTION }
-
-  const sub = quizSubmissions.value[idx]
-  if (sub && sub.user_answer != null) {
-    userAnswer.value = String(sub.user_answer ?? '')
-    submitted.value = true
-    resultCorrect.value = Number(sub.is_correct) === 1
-    resultExplanation.value = String(sub.explanation ?? '')
-  } else {
-    userAnswer.value = ''
+  if (!q?.content) {
     submitted.value = false
+    currentQuestion.value = { ...EMPTY_QUESTION }
+    userAnswer.value = ''
+    multiChoiceLetters.value = []
     resultCorrect.value = false
     resultExplanation.value = ''
+    return
   }
+
+  currentQuestion.value = q
+  const sub = quizSubmissions.value[idx]
+  if (sub && sub.user_answer != null) {
+    submitted.value = true
+    userAnswer.value = String(sub.user_answer ?? '')
+    resultCorrect.value = Number(sub.is_correct) === 1
+    resultExplanation.value = String(sub.explanation ?? '')
+    multiChoiceLetters.value = []
+  } else {
+    submitted.value = false
+    const draft = quizDraftAnswers.value[idx] ?? ''
+    userAnswer.value = draft
+    resultCorrect.value = false
+    resultExplanation.value = ''
+    if (q.question_type === 'multi_choice') {
+      multiChoiceLetters.value = parseMultiChoiceLetters(draft)
+    } else {
+      multiChoiceLetters.value = []
+    }
+  }
+}
+
+watch(
+  multiChoiceLetters,
+  (letters) => {
+    if (submitted.value) return
+    if (currentQuestion.value.question_type !== 'multi_choice') return
+    userAnswer.value = [...new Set(letters.map((x) => String(x).toUpperCase()))]
+      .filter((x) => /^[A-D]$/.test(x))
+      .sort()
+      .join(',')
+  },
+  { deep: true }
+)
+
+watch(userAnswer, (v) => {
+  if (submitted.value) return
+  const idx = currentQuestionIndex.value
+  if (!quizQuestions.value[idx]?.content) return
+  if (quizSubmissions.value[idx]) return
+  if (!quizDraftAnswers.value.length) return
+  quizDraftAnswers.value.splice(idx, 1, String(v ?? ''))
+})
+
+/**
+ * 从与 saveQuizState 相同结构的快照恢复小测 UI。
+ * @param options.forceQuizFinished 若传入则覆盖快照中的 quizFinished（历史「打开」时传 false 以进入做题区浏览）
+ */
+function hydrateQuizFromSaved(saved, options = {}) {
+  if (!saved?.quizQuestions || !Array.isArray(saved.quizQuestions) || saved.quizQuestions.length === 0) return false
+
+  selectedChapterId.value = saved.chapterId ?? null
+  questionTypeCounts.value = { ...DEFAULT_TYPE_COUNTS(), ...(saved.questionTypeCounts || {}) }
+  selectedKnowledgePointIds.value = Array.isArray(saved.selectedKnowledgePointIds) ? saved.selectedKnowledgePointIds : []
+
+  quizQuestions.value = saved.quizQuestions
+  quizSubmissions.value = Array.isArray(saved.quizSubmissions) ? saved.quizSubmissions : []
+  currentQuestionIndex.value = Number(saved.currentQuestionIndex ?? 0)
+  quizFinished.value =
+    options.forceQuizFinished !== undefined ? options.forceQuizFinished : Boolean(saved.quizFinished)
+
+  const n = quizQuestions.value.length
+  if (Array.isArray(saved.quizPlan) && saved.quizPlan.length === n) {
+    quizPlan.value = saved.quizPlan
+  } else {
+    quizPlan.value = quizQuestions.value.map((q) =>
+      q && typeof q === 'object'
+        ? {
+            question_type: q.question_type,
+            knowledge_point: q.knowledge_point || '',
+            knowledge_point_id: q.knowledge_point_id,
+            section_id: q.section_id ?? null
+          }
+        : null
+    )
+  }
+
+  if (Array.isArray(saved.quizDraftAnswers) && saved.quizDraftAnswers.length === n) {
+    quizDraftAnswers.value = [...saved.quizDraftAnswers]
+  } else {
+    quizDraftAnswers.value = Array.from({ length: n }, () => '')
+  }
+
+  currentQuestionIndex.value = Math.min(Math.max(currentQuestionIndex.value, 0), n - 1)
+  syncCurrentQuestionUI()
+
+  const firstNull = quizQuestions.value.findIndex((q) => q == null)
+  if (firstNull >= 0 && selectedChapterId.value != null && !quizFinished.value) {
+    quizGenerating.value = true
+    quizGenerationCancelled.value = false
+    void runQuizGenerationFrom(firstNull)
+  }
+  return true
 }
 
 function restoreQuizState() {
   try {
     const raw = localStorage.getItem(getQuizStorageKey())
     if (!raw) return
-    const saved = JSON.parse(raw)
-    if (!saved?.quizQuestions || !Array.isArray(saved.quizQuestions) || saved.quizQuestions.length === 0) return
-
-    selectedChapterId.value = saved.chapterId ?? null
-    questionTypeCounts.value = saved.questionTypeCounts || { choice: 0, fill: 0, short_answer: 0 }
-    selectedKnowledgePointIds.value = Array.isArray(saved.selectedKnowledgePointIds) ? saved.selectedKnowledgePointIds : []
-
-    quizQuestions.value = saved.quizQuestions
-    quizSubmissions.value = Array.isArray(saved.quizSubmissions) ? saved.quizSubmissions : []
-    currentQuestionIndex.value = Number(saved.currentQuestionIndex ?? 0)
-    quizFinished.value = Boolean(saved.quizFinished)
-
-    currentQuestionIndex.value = Math.min(Math.max(currentQuestionIndex.value, 0), quizQuestions.value.length - 1)
-    syncCurrentQuestionUI()
+    hydrateQuizFromSaved(JSON.parse(raw))
   } catch (_) {
     // 解析失败直接忽略恢复
   }
 }
 
+function restoreQuizFromHistory(entry) {
+  if (!entry?.quizQuestions?.length) return
+  quizGenerationCancelled.value = true
+  suppressQuizHistoryAppend.value = true
+  const payload = {
+    chapterId: entry.chapterId,
+    questionTypeCounts: entry.questionTypeCounts,
+    selectedKnowledgePointIds: entry.selectedKnowledgePointIds,
+    quizPlan: entry.quizPlan,
+    quizQuestions: entry.quizQuestions,
+    quizSubmissions: entry.quizSubmissions,
+    quizDraftAnswers: entry.quizDraftAnswers,
+    currentQuestionIndex: entry.currentQuestionIndex,
+    quizFinished: entry.quizFinished
+  }
+  hydrateQuizFromSaved(payload, { forceQuizFinished: false })
+  quizHistoryModalVisible.value = false
+  saveQuizState()
+}
+
 function clearQuiz() {
+  quizGenerationCancelled.value = true
+  suppressQuizHistoryAppend.value = false
   try {
     localStorage.removeItem(getQuizStorageKey())
   } catch (_) {}
+  quizPlan.value = []
   quizQuestions.value = []
   quizSubmissions.value = []
+  quizDraftAnswers.value = []
   currentQuestionIndex.value = 0
   quizFinished.value = false
+  quizGenerating.value = false
+  planFetching.value = false
   currentQuestion.value = { ...EMPTY_QUESTION }
   userAnswer.value = ''
+  multiChoiceLetters.value = []
   submitted.value = false
   resultCorrect.value = false
   resultExplanation.value = ''
 }
 
+function persistCurrentDraft() {
+  const idx = currentQuestionIndex.value
+  if (!quizQuestions.value[idx]?.content) return
+  if (quizSubmissions.value[idx]) return
+  if (!quizDraftAnswers.value.length) return
+  quizDraftAnswers.value.splice(idx, 1, String(userAnswer.value ?? ''))
+}
+
+async function runQuizGenerationFrom(startIndex) {
+  const chapterId = selectedChapter.value?.id
+  if (chapterId == null) {
+    quizGenerating.value = false
+    return
+  }
+  for (let i = startIndex; i < quizPlan.value.length; i++) {
+    if (quizGenerationCancelled.value) break
+    if (quizQuestions.value[i]) continue
+    const slot = quizPlan.value[i]
+    try {
+      const out = await exerciseGenerate(
+        slot.question_type,
+        slot.knowledge_point,
+        chapterId,
+        slot.section_id ?? null
+      )
+      out.knowledge_point_id = slot.knowledge_point_id
+      out.knowledge_point = slot.knowledge_point
+      const nextQs = [...quizQuestions.value]
+      nextQs[i] = out
+      quizQuestions.value = nextQs
+      if (currentQuestionIndex.value === i) {
+        syncCurrentQuestionUI()
+      }
+      saveQuizState()
+    } catch (e) {
+      console.error(e)
+      message.error(`第 ${i + 1} 题生成失败，请点击「清除」后重试`)
+      break
+    }
+  }
+  quizGenerating.value = false
+  quizGenerationCancelled.value = false
+}
+
 async function doGenerate() {
   if (!selectedChapter.value) return
   if (totalQuestionCount.value <= 0) return
+  if (totalQuestionCount.value > QUIZ_MAX_QUESTIONS) return
 
-  // 单次小测最多 10 道，按题型顺序截断（choice -> fill -> short_answer）
-  let remain = 10
   const questionTypeCountsPayload = {}
   for (const t of questionTypes) {
-    if (remain <= 0) break
     const requested = Math.floor(Number(questionTypeCounts.value[t.value] ?? 0))
     if (!Number.isFinite(requested) || requested <= 0) continue
-    const take = Math.min(requested, remain)
-    if (take > 0) questionTypeCountsPayload[t.value] = take
-    remain -= take
+    questionTypeCountsPayload[t.value] = requested
   }
   if (!Object.keys(questionTypeCountsPayload).length) return
 
-  generating.value = true
+  quizGenerationCancelled.value = false
+  suppressQuizHistoryAppend.value = false
   quizFinished.value = false
+  quizPlan.value = []
   quizQuestions.value = []
   quizSubmissions.value = []
+  quizDraftAnswers.value = []
   currentQuestionIndex.value = 0
   currentQuestion.value = { ...EMPTY_QUESTION }
   userAnswer.value = ''
+  multiChoiceLetters.value = []
   submitted.value = false
 
+  planFetching.value = true
   try {
-    const res = await exerciseQuizGenerate({
+    const res = await exerciseQuizPlan({
       chapter: selectedChapter.value.id,
       question_type_counts: questionTypeCountsPayload,
       knowledge_point_ids: selectedKnowledgePointIds.value
     })
-
-    quizQuestions.value = Array.isArray(res?.questions) ? res.questions : []
-    quizSubmissions.value = new Array(quizQuestions.value.length).fill(null)
+    const plan = Array.isArray(res?.plan) ? res.plan : []
+    if (!plan.length) {
+      message.error('未能获取小测题位，请重试')
+      return
+    }
+    const n = plan.length
+    quizPlan.value = plan
+    quizQuestions.value = Array.from({ length: n }, () => null)
+    quizSubmissions.value = Array.from({ length: n }, () => null)
+    quizDraftAnswers.value = Array.from({ length: n }, () => '')
     currentQuestionIndex.value = 0
     syncCurrentQuestionUI()
     saveQuizState()
+    quizGenerating.value = true
+    void runQuizGenerationFrom(0)
   } catch (e) {
     console.error(e)
-    // 失败时保持空状态，用户可重新操作
+    message.error('获取小测题位失败，请稍后重试')
   } finally {
-    generating.value = false
+    planFetching.value = false
   }
 }
 
@@ -617,8 +965,14 @@ async function doSubmit() {
   if (currentQuestion.value.question_type === 'choice') {
     answerToSend = answerToSend.toUpperCase().charAt(0)
   }
+  if (currentQuestion.value.question_type === 'multi_choice') {
+    answerToSend = formatMultiChoiceAnswer(answerToSend)
+  }
   let questionContent = currentQuestion.value.content
-  if (currentQuestion.value.question_type === 'choice' && currentQuestion.value.options?.length) {
+  if (
+    (currentQuestion.value.question_type === 'choice' || currentQuestion.value.question_type === 'multi_choice') &&
+    currentQuestion.value.options?.length
+  ) {
     questionContent = currentQuestion.value.content + '\n\n' + currentQuestion.value.options.join('\n')
   }
   try {
@@ -650,8 +1004,13 @@ async function doSubmit() {
 }
 
 function goNextQuestion() {
-  // 如果是最后一题：不清空题目，只标记“已完成”，避免用户误触导致内容消失
+  if (!canGoNextQuiz.value) return
+  persistCurrentDraft()
   if (currentQuestionIndex.value + 1 >= quizQuestions.value.length) {
+    if (!suppressQuizHistoryAppend.value) {
+      appendQuizHistory()
+    }
+    suppressQuizHistoryAppend.value = false
     quizFinished.value = true
     saveQuizState()
     return
@@ -664,7 +1023,8 @@ function goNextQuestion() {
 }
 
 function goPrevQuestion() {
-  if (currentQuestionIndex.value <= 0) return
+  if (!canGoPrevQuiz.value) return
+  persistCurrentDraft()
   currentQuestionIndex.value -= 1
   quizFinished.value = false
   syncCurrentQuestionUI()
@@ -1121,6 +1481,18 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+.exercises-generate-row-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.exercises-generate-row .exercises-history-btn {
+  margin-left: auto;
 }
 
 .exercises-generate-btn {
@@ -1143,7 +1515,7 @@ onMounted(async () => {
   cursor: not-allowed;
 }
 
-.exercises-clear-quiz-btn {
+.exercises-history-btn {
   padding: 10px 18px;
   border: 1px solid var(--gray-200);
   border-radius: 8px;
@@ -1155,15 +1527,90 @@ onMounted(async () => {
   white-space: nowrap;
 }
 
-.exercises-clear-quiz-btn:hover:not(:disabled) {
+.exercises-history-btn:hover {
   color: var(--primary-color);
   border-color: var(--primary-color);
   background-color: var(--light-bg);
 }
 
+.exercises-clear-quiz-btn {
+  padding: 10px 18px;
+  border: 1px solid var(--color-error-500);
+  border-radius: 8px;
+  background-color: var(--color-error-500);
+  color: var(--white);
+  font-size: 15px;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s;
+  white-space: nowrap;
+}
+
+.exercises-clear-quiz-btn:hover:not(:disabled) {
+  background-color: var(--color-error-700);
+  border-color: var(--color-error-700);
+}
+
 .exercises-clear-quiz-btn:disabled {
-  opacity: 0.7;
+  opacity: 0.45;
   cursor: not-allowed;
+}
+
+.exercises-history-empty {
+  color: var(--gray-500);
+  font-size: 14px;
+  padding: 12px 0;
+}
+
+.exercises-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.exercises-history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.exercises-history-item:last-child {
+  border-bottom: none;
+}
+
+.exercises-history-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.exercises-history-item-title {
+  font-size: 14px;
+  color: var(--dark-text);
+}
+
+.exercises-history-item-time {
+  font-size: 12px;
+  color: var(--gray-500);
+}
+
+.exercises-history-open-btn {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border: 1px solid var(--primary-color);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--primary-color);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.exercises-history-open-btn:hover {
+  background-color: var(--light-bg);
 }
 
 .exercises-quiz-limit-hint {
@@ -1293,6 +1740,11 @@ onMounted(async () => {
   cursor: pointer;
 }
 
+.exercises-option-checkbox {
+  margin-top: 6px;
+  cursor: pointer;
+}
+
 .exercises-option-label {
   flex: 1;
   font-size: 14px;
@@ -1412,8 +1864,16 @@ onMounted(async () => {
   transition: background-color 0.2s, color 0.2s;
 }
 
-.exercises-next-btn:hover {
+.exercises-next-btn:hover:not(:disabled) {
   background-color: var(--light-bg);
+}
+
+.exercises-next-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  border-color: var(--gray-200);
+  color: var(--gray-500);
+  pointer-events: none;
 }
 
 .exercises-quiz-actions {

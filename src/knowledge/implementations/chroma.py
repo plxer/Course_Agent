@@ -139,6 +139,7 @@ class ChromaKB(KnowledgeBase):
                 "chunk_id": chunk["chunk_id"],
                 "file_id": chunk["file_id"],
                 "chunk_index": chunk["chunk_index"],
+                "book_page": int(chunk.get("book_page", -1)),
             }
         return chunks
 

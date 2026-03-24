@@ -1,5 +1,6 @@
 import hashlib
 import os
+import re
 import time
 import traceback
 from pathlib import Path
@@ -98,60 +99,107 @@ def _unescape_separator(separator: str | None) -> str | None:
     return separator
 
 
+# 《计算机网络 Top-Down》等课本 Markdown 中插图路径：![](_page_<印刷页码>_xxx)
+PAGE_IMAGE_RE = re.compile(r"!\[\]\(_page_(\d+)_[^)]+\)")
+
+
+def _page_anchor_segments(text: str) -> list[tuple[int | None, str]]:
+    """按插图锚点分段：(起始插图印刷页码或 None, 段文本)。"""
+    matches = list(PAGE_IMAGE_RE.finditer(text))
+    if not matches:
+        return [(None, text)]
+
+    segments: list[tuple[int | None, str]] = []
+    first = matches[0].start()
+    if first > 0:
+        preamble = text[:first]
+        if preamble.strip():
+            segments.append((None, preamble))
+
+    for i, m in enumerate(matches):
+        start = m.start()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        segments.append((int(m.group(1)), text[start:end]))
+
+    return segments
+
+
+def _split_segment_to_text_chunks(
+    segment: str,
+    separator: str | None,
+    text_splitter: MarkdownTextSplitter,
+) -> list[str]:
+    if separator:
+        pre_chunks = segment.split(separator)
+        text_chunks: list[str] = []
+        for pre_chunk in pre_chunks:
+            if pre_chunk.strip():
+                text_chunks.extend(text_splitter.split_text(pre_chunk))
+        return text_chunks
+    return text_splitter.split_text(segment)
+
+
 def split_text_into_chunks(text: str, file_id: str, filename: str, params: dict = {}) -> list[dict]:
     """
-    将文本分割成块，使用 LangChain 的 MarkdownTextSplitter 进行智能分割
+    将文本分割成块，使用 LangChain 的 MarkdownTextSplitter 进行智能分割。
+
+    processing_params:
+        page_anchor_split: 为 True 时先按 ``![](_page_<页码>_...)`` 插图锚点分段（适用于 Top-Down 课本 MD），
+        再对每段做 chunk_size / chunk_overlap 切分。每个块带 ``book_page``：有锚点为印刷页码，否则为 -1。
     """
-    chunks = []
+    chunks: list[dict] = []
     chunk_size = params.get("chunk_size", 1000)
     chunk_overlap = params.get("chunk_overlap", 200)
 
-    # 获取分隔符并转换为实际字符
     separator = params.get("qa_separator")
     separator = _unescape_separator(separator)
 
-    # 向后兼容：如果旧配置设置了 use_qa_split=True 但未指定 separator，使用默认分隔符
     use_qa_split = params.get("use_qa_split", False)
     if use_qa_split and not separator:
         separator = "\n\n\n"
         logger.debug("启用了向后兼容模式：use_qa_split=True，使用默认分隔符 \\n\\n\\n")
 
-    # 使用 MarkdownTextSplitter 进行智能分割
-    # MarkdownTextSplitter 会尝试沿着 Markdown 格式的标题进行分割
     text_splitter = MarkdownTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
     )
 
-    # 如果设置了分隔符，先分割后以当前的分割逻辑处理
     if separator:
-        # 转换分隔符为可视格式（换行符显示为 \n）
         separator_display = separator.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
         logger.debug(f"启用预分割模式，使用分隔符: '{separator_display}'")
-        pre_chunks = text.split(separator)
-        text_chunks = []
-        for pre_chunk in pre_chunks:
-            if pre_chunk.strip():
-                text_chunks.extend(text_splitter.split_text(pre_chunk))
-    else:
-        text_chunks = text_splitter.split_text(text)
 
-    # 转换为标准格式
-    for chunk_index, chunk_content in enumerate(text_chunks):
-        if chunk_content.strip():  # 跳过空块
+    page_anchor_split = bool(params.get("page_anchor_split", False))
+    segments: list[tuple[int | None, str]]
+    if page_anchor_split:
+        segments = _page_anchor_segments(text)
+        logger.debug("page_anchor_split=True，按 _page_<印刷页码>_ 插图锚点预分段")
+    else:
+        segments = [(None, text)]
+
+    chunk_index = 0
+    for anchor_page, segment in segments:
+        if not segment.strip():
+            continue
+        text_chunks = _split_segment_to_text_chunks(segment, separator, text_splitter)
+        book_page = -1 if anchor_page is None else int(anchor_page)
+        for chunk_content in text_chunks:
+            if not chunk_content.strip():
+                continue
             chunks.append(
                 {
                     "id": f"{file_id}_chunk_{chunk_index}",
-                    "content": chunk_content,  # .strip(),
+                    "content": chunk_content,
                     "file_id": file_id,
                     "filename": filename,
                     "chunk_index": chunk_index,
                     "source": filename,
                     "chunk_id": f"{file_id}_chunk_{chunk_index}",
+                    "book_page": book_page,
                 }
             )
+            chunk_index += 1
 
-    logger.debug(f"Successfully split text into {len(chunks)} chunks using MarkdownTextSplitter")
+    logger.debug(f"Successfully split text into {len(chunks)} chunks (page_anchor_split={page_anchor_split})")
     return chunks
 
 

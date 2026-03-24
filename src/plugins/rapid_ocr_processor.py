@@ -6,16 +6,60 @@ RapidOCR 处理器 - 纯OCR文字识别
 
 import os
 import tempfile
+import threading
 import time
 from pathlib import Path
 
 import fitz
 import numpy as np
 from PIL import Image
+import rapidocr_onnxruntime as _rapidocr_pkg
 from rapidocr_onnxruntime import RapidOCR
 
 from src.plugins.document_processor_base import BaseDocumentProcessor, OCRException
 from src.utils import logger
+
+
+def _rapid_box_center_xy(box) -> tuple[float, float]:
+    """检测框四角 [[x,y],...] → 中心点。"""
+    if box is None:
+        return (0.0, 0.0)
+    pts = np.asarray(box, dtype=np.float64).reshape(-1, 2)
+    return float(pts[:, 0].mean()), float(pts[:, 1].mean())
+
+
+def _format_rapid_ocr_result(result: list, *, line_y_threshold: float = 20.0) -> str:
+    """RapidOCR 每个框默认单独一行输出；按框中心 y 分组合并，同行按 x 用空格拼接。"""
+    items: list[tuple[float, float, str]] = []
+    for line in result:
+        if not line or len(line) < 2:
+            continue
+        box, text = line[0], line[1]
+        text = (text or "").strip() if isinstance(text, str) else str(text).strip()
+        if not text:
+            continue
+        cx, cy = _rapid_box_center_xy(box)
+        items.append((cy, cx, text))
+    if not items:
+        return ""
+
+    items.sort(key=lambda t: (t[0], t[1]))
+    lines_out: list[str] = []
+    current_line = [items[0]]
+    current_y = items[0][0]
+
+    for cy, cx, text in items[1:]:
+        if abs(cy - current_y) <= line_y_threshold:
+            current_line.append((cy, cx, text))
+        else:
+            current_line.sort(key=lambda t: t[1])
+            lines_out.append(" ".join(t[2] for t in current_line))
+            current_line = [(cy, cx, text)]
+            current_y = cy
+
+    current_line.sort(key=lambda t: t[1])
+    lines_out.append(" ".join(t[2] for t in current_line))
+    return "\n".join(lines_out)
 
 
 class RapidOCRProcessor(BaseDocumentProcessor):
@@ -34,30 +78,34 @@ class RapidOCRProcessor(BaseDocumentProcessor):
     def get_supported_extensions(self) -> list[str]:
         return [".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"]
 
+    def _bundled_model_paths(self) -> tuple[str, str]:
+        """rapidocr_onnxruntime 自带的 PP-OCRv4 ONNX（未挂载 MODEL_DIR 时可用）。"""
+        base = os.path.join(os.path.dirname(_rapidocr_pkg.__file__), "models")
+        return (
+            os.path.join(base, "ch_PP-OCRv4_det_infer.onnx"),
+            os.path.join(base, "ch_PP-OCRv4_rec_infer.onnx"),
+        )
+
     def _get_model_paths(self) -> tuple[str, str]:
-        """获取模型文件路径"""
-        model_dir = os.path.join(self.model_dir_root, "SWHL/RapidOCR")
-        det_model_path = os.path.join(model_dir, "PP-OCRv4/ch_PP-OCRv4_det_infer.onnx")
-        rec_model_path = os.path.join(model_dir, "PP-OCRv4/ch_PP-OCRv4_rec_infer.onnx")
-        return det_model_path, rec_model_path
+        """优先 MODEL_DIR/SWHL/RapidOCR 布局；不存在则用 pip 包内置模型。"""
+        root = (self.model_dir_root or "").strip()
+        if root:
+            model_dir = os.path.join(root, "SWHL", "RapidOCR")
+            det_model_path = os.path.join(model_dir, "PP-OCRv4", "ch_PP-OCRv4_det_infer.onnx")
+            rec_model_path = os.path.join(model_dir, "PP-OCRv4", "ch_PP-OCRv4_rec_infer.onnx")
+            if os.path.isfile(det_model_path) and os.path.isfile(rec_model_path):
+                return det_model_path, rec_model_path
+        return self._bundled_model_paths()
 
     def check_health(self) -> dict:
         """检查 RapidOCR 模型是否可用"""
         try:
             det_model_path, rec_model_path = self._get_model_paths()
-            model_dir = os.path.dirname(os.path.dirname(det_model_path))
 
-            if not os.path.exists(model_dir):
+            if not os.path.isfile(det_model_path) or not os.path.isfile(rec_model_path):
                 return {
                     "status": "unavailable",
-                    "message": f"模型目录不存在: {model_dir}",
-                    "details": {"model_dir": model_dir},
-                }
-
-            if not os.path.exists(det_model_path) or not os.path.exists(rec_model_path):
-                return {
-                    "status": "unavailable",
-                    "message": "模型文件缺失",
+                    "message": "模型文件缺失（请检查 MODEL_DIR 下 SWHL/RapidOCR，或重装 rapidocr-onnxruntime）",
                     "details": {"det_model": det_model_path, "rec_model": rec_model_path},
                 }
 
@@ -67,10 +115,16 @@ class RapidOCRProcessor(BaseDocumentProcessor):
                     det_box_thresh=self.det_box_thresh, det_model_path=det_model_path, rec_model_path=rec_model_path
                 )
                 del test_ocr  # 释放资源
+                bundled = self._bundled_model_paths()
+                using_bundled = det_model_path == bundled[0] and rec_model_path == bundled[1]
                 return {
                     "status": "healthy",
                     "message": "RapidOCR模型可用",
-                    "details": {"model_path": self._get_model_paths()},
+                    "details": {
+                        "det_model": det_model_path,
+                        "rec_model": rec_model_path,
+                        "source": "bundled" if using_bundled else "MODEL_DIR",
+                    },
                 }
             except Exception as e:
                 return {"status": "error", "message": f"模型加载失败: {str(e)}", "details": {"error": str(e)}}
@@ -95,7 +149,9 @@ class RapidOCRProcessor(BaseDocumentProcessor):
             self.ocr = RapidOCR(
                 det_box_thresh=self.det_box_thresh, det_model_path=det_model_path, rec_model_path=rec_model_path
             )
-            logger.info(f"RapidOCR 模型加载成功 (det_box_thresh={self.det_box_thresh})")
+            bdet, brec = self._bundled_model_paths()
+            src = "内置" if det_model_path == bdet else "MODEL_DIR"
+            logger.info("RapidOCR 模型加载成功 (det_box_thresh={}, 来源={})", self.det_box_thresh, src)
         except Exception as e:
             raise OCRException(f"RapidOCR模型加载失败: {str(e)}", self.get_service_name(), "load_failed")
 
@@ -131,9 +187,9 @@ class RapidOCRProcessor(BaseDocumentProcessor):
                 result, _ = self.ocr(image_path)
                 processing_time = time.time() - start_time
 
-                # 提取文本
+                # 提取文本（按 y 合并同行，避免检测框过细导致一词一换行）
                 if result:
-                    text = "\n".join([line[1] for line in result])
+                    text = _format_rapid_ocr_result(result)
                     logger.info(
                         f"RapidOCR 成功: {os.path.basename(image_path) if isinstance(image, str) else 'temp_image'}"
                         f" ({processing_time:.2f}s)"
@@ -251,3 +307,18 @@ class RapidOCRProcessor(BaseDocumentProcessor):
             return self.process_pdf(file_path, params)
         else:
             return self.process_image(file_path, params)
+
+
+# 课本伴读选区 OCR：进程内复用单例，避免每次请求重复加载 ONNX。
+_course_reading_rapid_lock = threading.Lock()
+_course_reading_rapid_processor: RapidOCRProcessor | None = None
+
+
+def get_course_reading_rapid_ocr_processor() -> RapidOCRProcessor:
+    global _course_reading_rapid_processor
+    if _course_reading_rapid_processor is not None:
+        return _course_reading_rapid_processor
+    with _course_reading_rapid_lock:
+        if _course_reading_rapid_processor is None:
+            _course_reading_rapid_processor = RapidOCRProcessor()
+        return _course_reading_rapid_processor

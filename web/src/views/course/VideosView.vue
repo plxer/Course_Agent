@@ -9,7 +9,6 @@
         <div class="videos-right">
           <div class="videos-nav">
             <router-link to="/conversation" class="videos-nav-link" :class="{ active: $route.path === '/conversation' || $route.path === '/course' }">对话</router-link>
-            <router-link to="/exercises" class="videos-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
             <router-link to="/reading" class="videos-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
             <router-link
               to="/videos"
@@ -19,6 +18,7 @@
             >
               视频
             </router-link>
+            <router-link to="/exercises" class="videos-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
             <router-link to="/mall" class="videos-nav-link" :class="{ active: $route.path === '/mall' }">积分商城</router-link>
             <router-link v-if="userStore.isAdmin" to="/ops" class="videos-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
             <router-link to="/guide" class="videos-nav-link" :class="{ active: $route.path === '/guide' }">使用指南</router-link>

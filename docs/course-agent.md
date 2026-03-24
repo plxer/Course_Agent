@@ -15,7 +15,7 @@
 - `GET /api/course/books`：课本列表
 - `GET /api/course/books/{book_id}/pages`：课本页数
 - `GET /api/course/books/{book_id}/page/{page_num}`：课本某一页图片
-- `POST /api/course/books/ocr`：选区 OCR（优先 PaddleOCR → RapidOCR → PDF 文本兜底）
+- `POST /api/course/books/ocr`：选区取字（先 PDF 文字层 → 无则 RapidOCR；**Paddle 默认关闭**，设 `COURSE_READING_ENABLE_PADDLE_OCR=1` 时在 Rapid 仍无字后再试 Paddle）
 - `GET /api/course/reading-position?book_id=xxx`：获取当前用户某本书的阅读页码（需登录，永久记录）
 - `PUT /api/course/reading-position`：保存当前用户某本书的阅读页码（需登录，body: `{ book_id, page }`）
 - `GET /api/course/videos`：视频列表（按章节）
@@ -52,8 +52,8 @@ volumes:
 
 ## OCR 依赖
 
-- 课本伴读选区 OCR **优先使用 PaddleOCR**（高精度）。需安装依赖组：`uv sync --group paddle`。未安装时自动回退到 RapidOCR（ONNX），再不可用则使用 PDF 文本块提取。
-- 可选环境变量：`PADDLEOCR_USE_GPU=true` 启用 PaddleOCR GPU 推理。
+- 课本伴读选区：**先 PDF 文字层** → **RapidOCR**（pip 内置 ONNX 即可）。**PaddleOCR 默认不参与**（减轻容器内存与预热）；需要高精度回退时在运行环境设置 `COURSE_READING_ENABLE_PADDLE_OCR=1`。
+- 启用伴读 Paddle 时可选：`PADDLEOCR_USE_GPU=true` 做 GPU 推理。
 - 若需使用 Paddle 系文档解析（表格/版面），请启动 PaddleX 服务并在上传知识库时选择 PP-StructureV3。
 
 ### Docker 集成 PaddleOCR
