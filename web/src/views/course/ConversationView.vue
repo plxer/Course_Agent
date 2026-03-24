@@ -53,12 +53,12 @@
               >
                 <div class="conversation-item-title">{{ chat.title || `对话 ${index + 1}` }}</div>
                 <button 
-                  v-if="chatList.length > 1"
                   class="conversation-item-delete"
                   type="button"
+                  :disabled="chatList.length === 1 && (chat.messages?.length ?? 0) === 0"
                   @click.stop="deleteChat(chat.id)"
-                  title="删除对话"
-                  aria-label="删除对话"
+                  :title="chatList.length === 1 && (chat.messages?.length ?? 0) === 0 ? '仅剩一个空对话，无法删除' : '删除对话'"
+                  :aria-label="chatList.length === 1 && (chat.messages?.length ?? 0) === 0 ? '仅剩一个空对话，无法删除' : '删除对话'"
                 >
                   <svg class="conversation-item-delete-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                     <line x1="18" y1="6" x2="6" y2="18" />
@@ -175,7 +175,7 @@
                 ref="inputTextarea"
                 v-model="inputMessage"
                 class="conversation-view-textarea"
-                placeholder="本平台仅支持计算机网络相关知识点提问（如协议、TCP/IP、HTTP、DNS、路由、网络安全等），与课程无关的问题将无法解答。"
+                placeholder="本平台仅支持计算机网络相关知识点提问（如协议、TCP/IP、HTTP、DNS、SDN、路由、网络安全等），与课程无关的问题将无法解答。"
                 @input="adjustTextareaHeight"
                 @keydown.enter.exact.prevent="sendMessage"
                 @keydown.enter.shift.exact="handleShiftEnter"
@@ -243,18 +243,18 @@ function renderMarkdown(text) {
   return marked.parse(text, { gfm: true, breaks: true });
 }
 
-/** 课本页码偏移：知识库/摘录中显示的第 1 页对应课本第 12 页，故加 11 */
+/** PDF 页索引 = 课本页码 + 11（封面等占前 11 页） */
 const TEXTBOOK_PAGE_OFFSET = 11;
 
-/** 渲染 AI 消息：将 **数字**（课本页码）转为可点击跳转课本伴读的链接；并去掉链接后多余的「页」字避免「第35页页」 */
+/** 渲染 AI 消息：将 **数字**（课本页码）转为链接——文案显示课本页，跳转使用 PDF 页（课本页码 + 11） */
 function renderMarkdownWithPageLinks(text) {
   let html = renderMarkdown(text);
   if (!html || !textbookPdfBookId.value) return html;
   const bookId = textbookPdfBookId.value;
   html = html.replace(/<strong>(\d+)<\/strong>/g, (_, page) => {
-    const num = parseInt(page, 10);
-    const realPage = num + TEXTBOOK_PAGE_OFFSET;
-    return `<a href="/reading?book=${encodeURIComponent(bookId)}&page=${realPage}" class="conversation-view-page-link" data-book-id="${encodeURIComponent(bookId)}" data-page="${realPage}">第${realPage}页</a>`;
+    const printed = parseInt(page, 10);
+    const pdfPage = printed + TEXTBOOK_PAGE_OFFSET;
+    return `<a href="/reading?book=${encodeURIComponent(bookId)}&page=${pdfPage}" class="conversation-view-page-link" data-book-id="${encodeURIComponent(bookId)}" data-page="${pdfPage}">第${printed}页</a>`;
   });
   html = html.replace(/<\/a>\s*页/g, '</a>');
   return html;
@@ -454,6 +454,8 @@ const switchChat = async (chatId) => {
 const deleteChat = async (chatId) => {
   const index = store.chatList.findIndex((c) => c.id === chatId);
   if (index === -1) return;
+  const chat = store.chatList[index];
+  if (store.chatList.length === 1 && (chat.messages?.length ?? 0) === 0) return;
 
   if (userStore.isLoggedIn && store.defaultAgentId) {
     try {
@@ -491,7 +493,7 @@ const deleteChat = async (chatId) => {
         switchChat(store.chatList[0].id);
       }
     } else {
-      createNewChat();
+      await createNewChat();
     }
   }
 };
@@ -1049,9 +1051,14 @@ const scrollToBottom = () => {
   height: 14px;
 }
 
-.conversation-item-delete:hover {
+.conversation-item-delete:hover:not(:disabled) {
   background: #fecaca;
   color: #b91c1c;
+}
+
+.conversation-item-delete:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .conversation-item.active .conversation-item-delete {
@@ -1059,9 +1066,13 @@ const scrollToBottom = () => {
   color: var(--white);
 }
 
-.conversation-item.active .conversation-item-delete:hover {
+.conversation-item.active .conversation-item-delete:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.35);
   color: var(--white);
+}
+
+.conversation-item.active .conversation-item-delete:disabled {
+  opacity: 0.5;
 }
 
 /* 右侧对话内容：仅消息区可滚动，输入区固定在底部 */

@@ -351,8 +351,8 @@ async def stream_agent_chat(
     if course_context and isinstance(course_context, str) and course_context.strip():
         enable_web = config.get("enable_web_search") is True
         page_instruction = (
-            "仅以 **数字** 形式给出页码（如 **35**、**36**），不要在 **数字** 后面再写「页」字，"
-            "前端会自动将 **数字** 显示为「第N页」可点击链接。"
+            "仅以 **数字** 形式给出课本页码（如 **35**、**36**），不要在 **数字** 后面再写「页」字；"
+            "前端会显示为「第N页」（N 为课本页码），跳转阅读器时自动换算为 PDF 页（课本页码+11）。"
         )
         web_instruction = ""
         source_format_instruction = ""
@@ -367,7 +367,8 @@ async def stream_agent_chat(
             )
         wrapped_content = (
             "以下是从《计算机网络：自顶向下方法》课本中检索到的相关内容，请严格基于课本摘录作答。\n\n"
-            "重要说明：摘录中形如 **数字**（如 **327**）的是原书 PDF 页码。请你：\n"
+            "重要说明：摘录中标注的 **数字** 为课本页码（与纸书页脚一致），引用时请原样使用这些 **数字**。\n"
+            "请你：\n"
             "1. 先简要列出该题涉及的知识点；\n"
             "2. 再给出对应课本页码。" + page_instruction + "\n\n"
             + source_format_instruction

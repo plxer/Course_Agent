@@ -206,6 +206,9 @@ COURSE_KNOWLEDGE_BASES = [
     {"id": "computer_networking", "name": "计算机网络", "pdf_book_id": "ComputerNetworking-TopDown-v8-2021"},
 ]
 
+# 课程 Milvus 检索召回条数；筛选用「全局 top1 所在页 + 与 top_k 内页码 ±1 迭代相邻」的页
+COURSE_MILVUS_RECALL_TOP_K = 8
+
 
 class CourseChatRequest(BaseModel):
     query: str
@@ -261,6 +264,87 @@ def list_course_knowledge_bases():
     return {"knowledge_bases": COURSE_KNOWLEDGE_BASES}
 
 
+def _course_query_tokens(query: str) -> list[str]:
+    """用于检索加权的查询词（略去过短 token）。"""
+    return [t for t in re.split(r"[\s,，;；、]+", (query or "").strip()) if len(t) >= 2][:16]
+
+
+def _course_chunk_retrieval_score(query: str, item: dict) -> float:
+    """
+    在向量相似度基础上做轻量加权：优先 query 词出现在段首/前部，或出现在小节标题行（# / 1.2 样式）。
+    """
+    base = float(item.get("score", 0.0))
+    content = (item.get("content") or "").strip()
+    if not content:
+        return base
+    q_tokens = _course_query_tokens(query)
+    if not q_tokens:
+        return base
+    head_len = max(600, min(len(content), len(content) // 3 + 400))
+    head = content[:head_len].lower()
+    hits = sum(1 for t in q_tokens if t.lower() in head)
+    position_boost = 0.025 * (hits / len(q_tokens))
+    heading_boost = 0.0
+    for line in content.split("\n")[:14]:
+        ln = line.lower().strip()
+        if ln.startswith("#") or re.match(r"^\d+\.\d+", ln):
+            if any(t.lower() in ln for t in q_tokens):
+                heading_boost = 0.04
+                break
+    return base + position_boost + heading_boost
+
+
+def _course_chunks_top1_and_adjacent_pages(query: str, chunks: list[dict]) -> list[dict]:
+    """
+    在 Milvus 召回的 top_k 内：
+    1）先按检索分排序，每页（book_page>=0）只保留一条最高分块；
+    2）取全局最高分块为 top1；若其无有效页码，只返回该条；
+    3）否则在「本批召回里出现过的页码」中，迭代加入与已选集合相差 1 的页（7→8→9 闭包）。
+    返回块按课本页码升序排列。
+    """
+    if not chunks:
+        return []
+    ranked = sorted(chunks, key=lambda c: _course_chunk_retrieval_score(query, c), reverse=True)
+
+    best_by_page: dict[int, dict] = {}
+    best_orphans: dict[str, dict] = {}
+
+    for c in ranked:
+        meta = c.get("metadata") or {}
+        bp = meta.get("book_page", -1)
+        if isinstance(bp, int) and bp >= 0:
+            if bp not in best_by_page:
+                best_by_page[bp] = c
+        else:
+            cid = meta.get("chunk_id") or str(id(c))
+            if cid not in best_orphans:
+                best_orphans[cid] = c
+
+    representatives: list[dict] = list(best_by_page.values()) + list(best_orphans.values())
+    representatives.sort(key=lambda c: _course_chunk_retrieval_score(query, c), reverse=True)
+    top1 = representatives[0]
+
+    meta1 = top1.get("metadata") or {}
+    bp1 = meta1.get("book_page", -1)
+    if not isinstance(bp1, int) or bp1 < 0:
+        return [top1]
+
+    candidate_pages = set(best_by_page.keys())
+    selected: set[int] = {bp1}
+    while True:
+        added = False
+        for p in candidate_pages:
+            if p in selected:
+                continue
+            if any(abs(p - s) == 1 for s in selected):
+                selected.add(p)
+                added = True
+        if not added:
+            break
+
+    return [best_by_page[p] for p in sorted(selected)]
+
+
 async def _get_course_knowledge_context(query: str, kb_id: str, current_user) -> str:
     """
     根据课程知识库 id 从 Milvus 检索上下文。无回退：找不到对应库或调用失败即报错。
@@ -290,7 +374,7 @@ async def _get_course_knowledge_context(query: str, kb_id: str, current_user) ->
         chunks = await kb_manager.aquery(
             query,
             milvus_db["db_id"],
-            final_top_k=8,
+            final_top_k=COURSE_MILVUS_RECALL_TOP_K,
         )
     except Exception as e:
         logger.exception("Milvus 课程知识库检索失败: %s", e)
@@ -301,6 +385,9 @@ async def _get_course_knowledge_context(query: str, kb_id: str, current_user) ->
 
     if not chunks:
         return ""
+
+    chunks = _course_chunks_top1_and_adjacent_pages(query, chunks)
+
     parts = []
     total = 0
     max_chars = 8000
@@ -308,8 +395,13 @@ async def _get_course_knowledge_context(query: str, kb_id: str, current_user) ->
         content = (item.get("content") or "").strip()
         if not content:
             continue
-        source = (item.get("metadata") or {}).get("source", "")
-        block = f"【{source}】\n{content}\n" if source else f"{content}\n"
+        meta = item.get("metadata") or {}
+        source = meta.get("source", "")
+        bp = meta.get("book_page", -1)
+        page_line = ""
+        if isinstance(bp, int) and bp > 0:
+            page_line = f"【本段对应课本页码 **{bp}**，引用时请仍写 **{bp}**】\n"
+        block = f"【{source}】\n{page_line}{content}\n" if source else f"{page_line}{content}\n"
         if total + len(block) > max_chars:
             block = block[: max_chars - total]
         parts.append(block)
@@ -347,6 +439,25 @@ def _llm_answer_is_no_relevant(text: str) -> bool:
     return bool(re.match(r"^\s*(NO|NOT)\b", upper))
 
 
+# 命中则跳过 fast 模型相关性判断，避免小模型不认识缩写（如 SDN）而误拦
+_COURSE_QUERY_NETWORKING_HINT_RE = re.compile(
+    r"(sdn|openflow|nfv|软件定义网络|网络功能虚拟化|"
+    r"tcp/ip|\btcp\b|\budp\b|quic|http|https|dns|dhcp|ddos|"
+    r"bgp|ospf|\bisis\b|mpls|vlan|vpn|\bnat\b|\bgre\b|vxlan|"
+    r"socket|icmp|arp|mac地址|以太网|ieee\s*802|wi-?fi|无线局域网|蜂窝|"
+    r"ssl|tls|ipsec|防火墙|入侵检测|"
+    r"路由|路由器|交换机|协议|数据报|分组|拥塞|"
+    r"网络安全|网络层|链路层|传输层|运输层|应用层|物理层|"
+    r"cdn|p2p|流媒体|"
+    r"计算机网络|自顶向下)",
+    re.I,
+)
+
+
+def _course_query_has_networking_keyword_hint(query: str) -> bool:
+    return bool(_COURSE_QUERY_NETWORKING_HINT_RE.search(query or ""))
+
+
 async def _is_query_related_to_computer_networking(
     query: str,
     *,
@@ -360,12 +471,18 @@ async def _is_query_related_to_computer_networking(
     query = (query or "").strip()[:500]
     if not query:
         return False
+
+    if _course_query_has_networking_keyword_hint(query):
+        return True
+
     from langchain_core.messages import HumanMessage, SystemMessage
 
     prompt = (
-        "你是一个判断题助手。仅根据用户的问题判断：该问题是否与《计算机网络》课程内容相关？\n"
-        "相关包括：网络协议、TCP/IP、HTTP、DNS、路由、交换机、网络安全、拥塞控制、Socket 等课本概念与习题。\n"
-        "不相关包括：与网络无关的数学、编程、其他课程、生活闲聊等。\n"
+        "你是一个判断题助手。仅根据用户的问题判断：该问题是否与《计算机网络》课程/教材范畴相关？\n"
+        "相关包括：网络协议与体系结构、TCP/IP、HTTP、DNS、路由与交换、SDN/NFV/OpenFlow、"
+        "数据中心与云网络、无线与移动网络、网络安全、拥塞控制、Socket、QoS、CDN、P2P 等；"
+        "含英文缩写的专业名词（如 SDN、BGP、MPLS）若属于网络领域，一律算相关。\n"
+        "不相关包括：与计算机网络无关的纯数学、其它工科课程、生活闲聊、与网络无关的通用编程语法等。\n"
         "只回答一个词：YES 或 NO。"
     )
     try:
@@ -420,7 +537,7 @@ async def course_chat_stream(
     ):
         raise HTTPException(
             status_code=400,
-            detail="您的问题与《计算机网络》课程内容无关。为节省资源，请仅在此处询问与计算机网络相关的问题（如协议、TCP/IP、HTTP、DNS、路由、网络安全等）。",
+            detail="您的问题与《计算机网络》课程内容无关。为节省资源，请仅在此处询问与计算机网络相关的问题（如协议、TCP/IP、HTTP、DNS、SDN、路由、网络安全等）。",
         )
 
     # 课程对话优先使用环境变量 DEFAULT_AGENT_ID，否则 config，否则固定 ChatbotAgent（不依赖 agents 顺序）

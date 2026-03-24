@@ -802,9 +802,8 @@ class MilvusKB(KnowledgeBase):
 
         return {**basic_info, **content_info}
 
-    def delete_database(self, db_id: str) -> dict:
+    async def delete_database(self, db_id: str) -> dict:
         """删除数据库，同时清除Milvus中的集合"""
-        # Drop Milvus collection
         try:
             if utility.has_collection(db_id, using=self.connection_alias):
                 utility.drop_collection(db_id, using=self.connection_alias)
@@ -814,8 +813,7 @@ class MilvusKB(KnowledgeBase):
         except Exception as e:
             logger.error(f"Failed to drop Milvus collection {db_id}: {e}")
 
-        # Call base method to delete local files and metadata
-        return super().delete_database(db_id)
+        return await super().delete_database(db_id)
 
     def get_query_params_config(self, db_id: str, **kwargs) -> dict:
         """获取 Milvus 知识库的查询参数配置"""

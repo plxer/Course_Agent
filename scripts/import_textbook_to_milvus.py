@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
 将《计算机网络：自顶向下方法》Markdown 课本切分并导入 Milvus 知识库，供课程对话检索使用。
+切分规则：按正文中 **页码** 标记（仅数字，如 **12**）分段，每页一整条向量；与旧的「插图锚点 + 1000 字切片」不同。
+若知识库里已有同一 MD 文件记录，脚本会跳过导入——需先在 Web 知识库管理中删除该文件后再运行，才会按新规则重建索引。
 
 使用方式（在项目根目录，且 Milvus 已启动）：
   docker compose exec api uv run python scripts/import_textbook_to_milvus.py
@@ -99,10 +101,8 @@ async def main():
             path_str,
             params={
                 "content_type": "file",
-                "chunk_size": 1000,
-                "chunk_overlap": 200,
-                # 课本 MD 含 ![](_page_<印刷页码>_...) 插图路径，先按锚点分段再按长度切分
-                "page_anchor_split": True,
+                # 按正文中的 **页码** 标记（仅数字）切分，每页一整块入库；更换策略时需先从知识库删除旧文件再导入
+                "page_bold_split": True,
             },
             operator_id=None,
         )

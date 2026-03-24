@@ -99,12 +99,30 @@ def _unescape_separator(separator: str | None) -> str | None:
     return separator
 
 
-# 《计算机网络 Top-Down》等课本 Markdown 中插图路径：![](_page_<印刷页码>_xxx)
+# 《计算机网络 Top-Down》等课本 Markdown 中插图路径：![](_page_<页码>_xxx)
 PAGE_IMAGE_RE = re.compile(r"!\[\]\(_page_(\d+)_[^)]+\)")
+# 课本正文中页码常写作独立标记 **12**（仅数字，避免匹配 **hosts** 等）
+BOLD_PAGE_NUM_RE = re.compile(r"\*\*(\d+)\*\*")
+
+
+def _bold_page_segments(text: str) -> list[tuple[int, str]]:
+    """按 **页码** 标记分段：在 **a** 结束之后、下一处 **数字** 之前的内容归属页 a。"""
+    matches = list(BOLD_PAGE_NUM_RE.finditer(text))
+    if not matches:
+        return []
+    segments: list[tuple[int, str]] = []
+    for i, m in enumerate(matches):
+        page = int(m.group(1))
+        body_start = m.end()
+        body_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        segment = text[body_start:body_end].strip()
+        if segment:
+            segments.append((page, segment))
+    return segments
 
 
 def _page_anchor_segments(text: str) -> list[tuple[int | None, str]]:
-    """按插图锚点分段：(起始插图印刷页码或 None, 段文本)。"""
+    """按插图锚点分段：(起始插图对应页码或 None, 段文本)。"""
     matches = list(PAGE_IMAGE_RE.finditer(text))
     if not matches:
         return [(None, text)]
@@ -144,8 +162,11 @@ def split_text_into_chunks(text: str, file_id: str, filename: str, params: dict 
     将文本分割成块，使用 LangChain 的 MarkdownTextSplitter 进行智能分割。
 
     processing_params:
+        page_bold_split: 为 True 时按 ``**页码**``（仅数字）分段，**每页一整块**，不再做 chunk_size 切分；
+            ``book_page`` 为该页码。未匹配到任何锚点时回退为普通切分。
         page_anchor_split: 为 True 时先按 ``![](_page_<页码>_...)`` 插图锚点分段（适用于 Top-Down 课本 MD），
-        再对每段做 chunk_size / chunk_overlap 切分。每个块带 ``book_page``：有锚点为印刷页码，否则为 -1。
+            再对每段做 chunk_size / chunk_overlap 切分。每个块带 ``book_page``：有锚点为页码，否则为 -1。
+            与 page_bold_split 同时开启时，以 page_bold_split 为准。
     """
     chunks: list[dict] = []
     chunk_size = params.get("chunk_size", 1000)
@@ -168,11 +189,40 @@ def split_text_into_chunks(text: str, file_id: str, filename: str, params: dict 
         separator_display = separator.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
         logger.debug(f"启用预分割模式，使用分隔符: '{separator_display}'")
 
+    page_bold_split = bool(params.get("page_bold_split", False))
+    if page_bold_split:
+        bold_segments = _bold_page_segments(text)
+        if not bold_segments:
+            logger.warning("page_bold_split=True 但未匹配到 **数字** 页码标记，回退为普通 Markdown 切分")
+            page_bold_split = False
+        else:
+            chunk_index = 0
+            for book_page, chunk_content in bold_segments:
+                if not chunk_content.strip():
+                    continue
+                chunks.append(
+                    {
+                        "id": f"{file_id}_chunk_{chunk_index}",
+                        "content": chunk_content,
+                        "file_id": file_id,
+                        "filename": filename,
+                        "chunk_index": chunk_index,
+                        "source": filename,
+                        "chunk_id": f"{file_id}_chunk_{chunk_index}",
+                        "book_page": int(book_page),
+                    }
+                )
+                chunk_index += 1
+            logger.debug(
+                f"Successfully split text into {len(chunks)} chunks (page_bold_split=True, by **页码**)"
+            )
+            return chunks
+
     page_anchor_split = bool(params.get("page_anchor_split", False))
     segments: list[tuple[int | None, str]]
     if page_anchor_split:
         segments = _page_anchor_segments(text)
-        logger.debug("page_anchor_split=True，按 _page_<印刷页码>_ 插图锚点预分段")
+        logger.debug("page_anchor_split=True，按 _page_<页码>_ 插图锚点预分段")
     else:
         segments = [(None, text)]
 
@@ -199,7 +249,9 @@ def split_text_into_chunks(text: str, file_id: str, filename: str, params: dict 
             )
             chunk_index += 1
 
-    logger.debug(f"Successfully split text into {len(chunks)} chunks (page_anchor_split={page_anchor_split})")
+    logger.debug(
+        f"Successfully split text into {len(chunks)} chunks (page_anchor_split={page_anchor_split})"
+    )
     return chunks
 
 

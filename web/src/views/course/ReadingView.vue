@@ -349,7 +349,7 @@
               ref="chatTextarea"
               v-model="chatInputMessage" 
               class="reading-chat-textarea" 
-              placeholder="本平台仅支持计算机网络相关知识点提问（如协议、TCP/IP、HTTP、DNS、路由、网络安全等），与课程无关的问题将无法解答。"
+              placeholder="本平台仅支持计算机网络相关知识点提问（如协议、TCP/IP、HTTP、DNS、SDN、路由、网络安全等），与课程无关的问题将无法解答。"
               @input="adjustTextareaHeight"
               @keydown.enter.exact.prevent="sendChatMessage"
               @keydown.enter.shift.exact="handleShiftEnter"
