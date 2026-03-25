@@ -254,7 +254,7 @@ function renderMarkdownWithPageLinks(text) {
   html = html.replace(/<strong>(\d+)<\/strong>/g, (_, page) => {
     const printed = parseInt(page, 10);
     const pdfPage = printed + TEXTBOOK_PAGE_OFFSET;
-    return `<a href="/reading?book=${encodeURIComponent(bookId)}&page=${pdfPage}" class="conversation-view-page-link" data-book-id="${encodeURIComponent(bookId)}" data-page="${pdfPage}">第${printed}页</a>`;
+    return `<a href="/reading?book=${encodeURIComponent(bookId)}&page=${pdfPage}&from=conversation" class="conversation-view-page-link" data-book-id="${encodeURIComponent(bookId)}" data-page="${pdfPage}">第${printed}页</a>`;
   });
   html = html.replace(/<\/a>\s*页/g, '</a>');
   return html;
@@ -272,7 +272,10 @@ function onMessageContentClick(e) {
 function goToReadingPage(bookId, page) {
   if (!bookId || !page || page < 1) return;
   if (userStore.isLoggedIn) saveReadingPosition(bookId, page).catch(() => {});
-  router.push({ path: '/reading', query: { book: bookId, page: String(page) } });
+  router.push({
+    path: '/reading',
+    query: { book: bookId, page: String(page), from: 'conversation' },
+  });
 }
 
 const handleLogout = () => {

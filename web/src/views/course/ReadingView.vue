@@ -145,7 +145,7 @@
     <!-- PDF 阅读器 -->
     <main class="reading-reader" v-else>
       <div class="reading-reader-header">
-        <button class="reading-back-btn" @click="selectedBook = null; syncReaderToQuery()">
+        <button class="reading-back-btn" type="button" @click="handleReaderBack">
           <ArrowLeftOutlined /> 返回
         </button>
         <h2 class="reading-reader-title">{{ selectedBook.name }} · {{ selectedBook.book_label || '课本' }}</h2>
@@ -252,7 +252,7 @@
                 @mouseup.stop.prevent
                 type="button"
               >
-                <CommentOutlined /> 发送到对话
+                <CommentOutlined /> 问问AI
               </button>
               <button 
                 v-if="selectedText && selectedText !== '正在识别...'"
@@ -626,18 +626,29 @@ function loadReadingPosition(bookId) {
   }
 }
 
-// 同步当前书/页到 URL，便于刷新后恢复；进入阅读时 push 以支持浏览器后退回列表
+/** 从课程对话页码链接进入伴读时携带，用于「返回」回到对话而非伴读首页 */
+const READING_FROM_CONVERSATION = 'conversation';
+
+function readingFromConversation() {
+  return route.query.from === READING_FROM_CONVERSATION;
+}
+
+// 同步当前书/页到 URL，便于刷新后恢复；从伴读首页进入阅读时 push 以支持浏览器后退回列表
 function syncReaderToQuery() {
   const book = selectedBook.value;
   const page = currentPage.value;
+  const fromQ = readingFromConversation() ? { from: READING_FROM_CONVERSATION } : {};
   if (!book) {
     if (route.query.book || route.query.page) {
       router.replace({ path: '/reading', query: {} });
     }
     return;
   }
-  const next = { path: '/reading', query: { book: book.id, page: String(page) } };
-  if (route.query.book !== next.query.book || route.query.page !== next.query.page) {
+  const next = { path: '/reading', query: { book: book.id, page: String(page), ...fromQ } };
+  const sameBook = route.query.book === next.query.book;
+  const samePage = route.query.page === next.query.page;
+  const sameFrom = (route.query.from || '') === (next.query.from || '');
+  if (!sameBook || !samePage || !sameFrom) {
     const isEnteringReader = !route.query.book;
     if (isEnteringReader) {
       router.push(next);
@@ -645,6 +656,15 @@ function syncReaderToQuery() {
       router.replace(next);
     }
   }
+}
+
+// 从对话跳转而来：返回对话；从伴读首页选书：回到伴读首页（与浏览器后退栈一致）
+function handleReaderBack() {
+  if (readingFromConversation()) {
+    router.back();
+    return;
+  }
+  goToList();
 }
 
 // 返回课本列表（供导航“课本伴读”点击与浏览器后退后同步状态）
@@ -1754,6 +1774,8 @@ onMounted(async () => {
   line-height: 1.6;
   white-space: pre-wrap; /* 保留换行与空格，与 OCR 版式一致 */
   word-break: break-word;
+  /* 覆盖 .reading-pdf-page 的 user-select: none，便于复制已选文本 */
+  user-select: text;
 }
 
 .reading-selection-actions {
