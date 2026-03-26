@@ -21,7 +21,7 @@
     </div>
 
     <div class="option-item" @click="handleImageUpload">
-      <a-tooltip title="支持 jpg/jpeg/png/gif， ≤ 5 MB" placement="right">
+      <a-tooltip title="选择图片" placement="right">
         <div class="option-content">
           <Image :size="14" class="option-icon" />
           <span class="option-text">上传图片</span>

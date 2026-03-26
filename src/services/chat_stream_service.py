@@ -9,6 +9,7 @@ from langchain.messages import AIMessage, AIMessageChunk, HumanMessage
 from langgraph.types import Command
 
 from src import config as conf
+from src.config.app import DEFAULT_VISION_MODEL_SPEC
 from src import knowledge_base
 from src.agents import agent_manager
 from src.plugins.guard import content_guard
@@ -292,6 +293,7 @@ async def stream_agent_chat(
     config: dict,
     meta: dict,
     image_content: str | None,
+    image_mime_type: str | None = None,
     current_user,
     db,
 ) -> AsyncIterator[bytes]:
@@ -305,11 +307,15 @@ async def stream_agent_chat(
             + b"\n"
         )
 
+    image_mime = (image_mime_type or "image/jpeg").strip()
+    if not image_mime.startswith("image/"):
+        image_mime = "image/jpeg"
+
     if image_content:
         human_message = HumanMessage(
             content=[
                 {"type": "text", "text": query},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_content}"}},
+                {"type": "image_url", "image_url": {"url": f"data:{image_mime};base64,{image_content}"}},
             ]
         )
         message_type = "multimodal_image"
@@ -362,15 +368,24 @@ async def stream_agent_chat(
                 "并请在本轮回答中至少使用一次网络搜索工具以补充或核实信息，使课本与网络内容紧密配合。\n\n"
             )
             source_format_instruction = (
-                "列举知识点时只使用一行标题：「基于课本摘录和搜索结果，该问题涉及的知识点包括：」，"
-                "不要先写「基于课本摘录，该问题涉及的知识点包括：」再写「基于课本摘录和搜索结果…」。\n\n"
+                "开启网络搜索时：「涉及知识点」可简要概括课本与补充信息中的核心概念；"
+                "「对应课本页码」仅填写课本摘录中的页码数字，不要写成网址或网页标题。\n\n"
             )
+        summary_lines_instruction = (
+            "3. 正文结束后另起段落，必须追加两行，且均为「标签：内容」同一行（标签六字与全角冒号须原样保留）：\n"
+            "一行写作「涉及知识点：」并在冒号后写简要知识点（多项用顿号分隔）；\n"
+            "下一行写作「对应课本页码：」并在冒号后只写课本页码数字（多页用顿号分隔）。"
+            + page_instruction
+            + "\n\n"
+        )
         wrapped_content = (
             "以下是从《计算机网络：自顶向下方法》课本中检索到的相关内容，请严格基于课本摘录作答。\n\n"
             "重要说明：摘录中标注的 **数字** 为课本页码（与纸书页脚一致），引用时请原样使用这些 **数字**。\n"
             "请你：\n"
-            "1. 先简要列出该题涉及的知识点；\n"
-            "2. 再给出对应课本页码。" + page_instruction + "\n\n"
+            "1. 先直接回应用户的问题：用自然、连贯的表述解释相关概念或原理；若用户附有图片，先说明图中表达了什么、"
+            "各符号或流程的含义，再结合课本说明。不要一上来先列「涉及知识点」或要点清单。\n"
+            "2. 主体讲清问题后再写上述两行收尾，中间为正文，不要把「涉及知识点」「对应课本页码」插在正文开头。\n"
+            + summary_lines_instruction
             + source_format_instruction
             + web_instruction
             + "【课本摘录】\n"
@@ -378,7 +393,15 @@ async def stream_agent_chat(
             "【用户问题】\n"
             f"{query}"
         )
-        human_message = HumanMessage(content=wrapped_content)
+        if image_content:
+            human_message = HumanMessage(
+                content=[
+                    {"type": "text", "text": wrapped_content},
+                    {"type": "image_url", "image_url": {"url": f"data:{image_mime};base64,{image_content}"}},
+                ]
+            )
+        else:
+            human_message = HumanMessage(content=wrapped_content)
         messages = [human_message]
 
     user_id = str(current_user.id)
@@ -415,6 +438,11 @@ async def stream_agent_chat(
         agent_config = {**agent_config, "enable_web_search": bool(config["enable_web_search"])}
     if "knowledges" in config:
         agent_config = {**agent_config, "knowledges": config["knowledges"] if config["knowledges"] else []}
+
+    if image_content:
+        vm = ((getattr(conf, "vision_model", None) or "").strip() or DEFAULT_VISION_MODEL_SPEC)
+        agent_config = {**agent_config, "model": vm}
+        logger.info("Multimodal request: using vision model %s", vm)
 
     # 本回合若开启了联网搜索或知识库，注入明确指令，避免模型因上下文已有内容而不调用工具
     tool_use_instruction = ""

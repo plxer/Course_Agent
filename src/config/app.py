@@ -25,6 +25,9 @@ from src.config.static.models import (
 )
 from src.utils.logging_config import logger
 
+# 含图消息使用的多模态模型默认值；用户可在设置中修改 vision_model，若被清空则代码侧仍回退到此规格
+DEFAULT_VISION_MODEL_SPEC = "siliconflow/Qwen/Qwen3-VL-30B-A3B-Instruct"
+
 
 class Config(BaseModel):
     """应用配置类"""
@@ -38,7 +41,7 @@ class Config(BaseModel):
     # ============================================================
     # 功能开关
     # ============================================================
-    enable_reranker: bool = Field(default=False, description="是否开启重排序")
+    enable_reranker: bool = Field(default=True, description="是否开启重排序")
     enable_content_guard: bool = Field(default=False, description="是否启用内容审查")
     enable_content_guard_llm: bool = Field(default=False, description="是否启用LLM内容审查")
     enable_web_search: bool = Field(default=False, description="是否启用网络搜索")
@@ -49,6 +52,13 @@ class Config(BaseModel):
     default_model: str = Field(
         default="siliconflow/deepseek-ai/DeepSeek-V3.2",
         description="默认对话模型",
+    )
+    vision_model: str = Field(
+        default=DEFAULT_VISION_MODEL_SPEC,
+        description=(
+            "用户消息含图片时，该轮临时使用此多模态模型（与智能体是否声明能力无关）；"
+            "无图消息仍用智能体配置里的模型。若此处留空则回退至 DEFAULT_VISION_MODEL_SPEC。"
+        ),
     )
     fast_model: str = Field(
         default="siliconflow/THUDM/GLM-4-9B-0414",

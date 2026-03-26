@@ -24,6 +24,18 @@
           </div>
         </div>
       </div>
+      <div class="setting-row">
+        <div class="col-item">
+          <div class="setting-label">{{ items?.vision_model?.des || '含图对话模型（多模态）' }}</div>
+          <div class="setting-content">
+            <ModelSelectorComponent
+              @select-model="handleVisionModelSelect"
+              :model_spec="configStore.config?.vision_model"
+              placeholder="含图消息默认用此项；留空则使用内置多模态回退模型"
+            />
+          </div>
+        </div>
+      </div>
       <div class="setting-row two-cols">
         <div class="col-item">
           <div class="setting-label">{{ items?.embed_model.des }}</div>
@@ -196,6 +208,12 @@ const handleChatModelSelect = (spec) => {
 const handleFastModelSelect = (spec) => {
   if (typeof spec === 'string' && spec) {
     configStore.setConfigValue('fast_model', spec)
+  }
+}
+
+const handleVisionModelSelect = (spec) => {
+  if (typeof spec === 'string') {
+    configStore.setConfigValue('vision_model', spec.trim())
   }
 }
 

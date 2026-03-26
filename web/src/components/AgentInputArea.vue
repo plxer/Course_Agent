@@ -21,6 +21,21 @@
         class="image-preview-wrapper"
       />
     </template>
+    <template #options-inline>
+      <a-tooltip title="选择图片" placement="top">
+        <a-button
+          type="text"
+          class="input-inline-image-btn"
+          aria-label="上传图片"
+          :disabled="disabled"
+          @click.stop="triggerInlineImagePick"
+        >
+          <template #icon>
+            <PictureOutlined />
+          </template>
+        </a-button>
+      </a-tooltip>
+    </template>
     <template #options-left>
       <AttachmentOptionsComponent
         v-if="supportsFileUpload"
@@ -58,6 +73,8 @@ import { threadApi } from '@/apis'
 import { AgentValidator } from '@/utils/agentValidator'
 import { handleChatError, handleValidationError } from '@/utils/errorHandler'
 import { FolderCode } from 'lucide-vue-next'
+import { PictureOutlined } from '@ant-design/icons-vue'
+import { multimodalApi } from '@/apis/agent_api'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
@@ -127,6 +144,61 @@ const handleImageUpload = (imageData) => {
   }
 }
 
+/** 输入框旁常驻图片按钮，与「+」菜单内上传共用同一套处理 */
+const triggerInlineImagePick = () => {
+  if (props.disabled) return
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'image/*'
+  input.multiple = false
+  input.style.display = 'none'
+  input.onchange = async (event) => {
+    const file = event.target.files?.[0]
+    if (file) await processPickedImageFile(file)
+    document.body.removeChild(input)
+  }
+  document.body.appendChild(input)
+  input.click()
+}
+
+const processPickedImageFile = async (file) => {
+  try {
+    if (file.size > 10 * 1024 * 1024) {
+      message.error('图片文件过大，请选择小于10MB的图片')
+      return
+    }
+    if (!file.type.startsWith('image/')) {
+      message.error('请选择有效的图片文件')
+      return
+    }
+    message.loading({ content: '正在处理图片...', key: 'image-upload' })
+    const result = await multimodalApi.uploadImage(file)
+    if (result.success) {
+      message.success({ content: '图片处理成功', key: 'image-upload', duration: 2 })
+      handleImageUpload({
+        success: true,
+        imageContent: result.image_content,
+        thumbnailContent: result.thumbnail_content,
+        width: result.width,
+        height: result.height,
+        format: result.format,
+        mimeType: result.mime_type || file.type,
+        sizeBytes: result.size_bytes,
+        originalName: file.name
+      })
+      handleImageUploadSuccess()
+    } else {
+      message.error({ content: `图片处理失败: ${result.error}`, key: 'image-upload' })
+    }
+  } catch (error) {
+    console.error('图片上传失败:', error)
+    message.error({
+      content: `图片上传失败: ${error.message || '未知错误'}`,
+      key: 'image-upload'
+    })
+  }
+}
+
 const handleImageUploadSuccess = () => {
   if (inputRef.value) {
     inputRef.value.closeOptions()
@@ -162,6 +234,31 @@ defineExpose({
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.input-inline-image-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-600);
+  border: 1px solid transparent;
+  background-color: transparent;
+
+  &:hover:not(:disabled) {
+    color: var(--main-color);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .anticon {
+    font-size: 16px;
+  }
 }
 
 .state-toggle-btn {

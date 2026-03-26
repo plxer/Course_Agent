@@ -90,7 +90,12 @@
               <svg class="avatar-robot" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h2v1h2v2h2v2h1c.55 0 1 .45 1 1v2h1v2h-1v2H4v-2H3v-2h1v-2c0-.55.45-1 1-1h1v-2h2V8h2V7h2V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M8 18h8v-2H8v2m-1-5h2v2H7v-2m8 0v2h-2v-2h2m-3-3h2v2h-2v-2m-4 0v2H7v-2h2z"/></svg>
             </div>
             <div class="conversation-view-message-content" :class="message.role">
-              <div v-if="message.role === 'user'" class="message-text">{{ message.content }}</div>
+              <div v-if="message.role === 'user'" class="conversation-view-user-msg">
+                <div v-if="message.image_content" class="conversation-view-user-img-wrap">
+                  <img :src="conversationUserImageSrc(message)" alt="" class="conversation-view-user-img" />
+                </div>
+                <div v-if="message.content" class="message-text">{{ message.content }}</div>
+              </div>
               <template v-else-if="message.role === 'ai'">
                 <div
                   v-if="message.sources && message.sources.length > 0"
@@ -171,11 +176,25 @@
               </label>
             </div>
             <div class="conversation-view-input-area">
+              <div v-if="pendingConversationImage" class="conversation-view-pending-img">
+                <img :src="pendingConversationImageThumbSrc" alt="" class="conversation-view-pending-thumb" />
+                <button type="button" class="conversation-view-pending-remove" @click="clearPendingConversationImage">移除图片</button>
+              </div>
+              <div class="conversation-view-input-row">
+              <button
+                type="button"
+                class="conversation-view-img-btn"
+                title="选择图片"
+                :disabled="isLoading && currentChatId === activeRequestChatId"
+                @click="pickConversationImage"
+              >
+                <Image :size="20" class="conversation-view-img-btn-icon" aria-hidden="true" />
+              </button>
               <textarea
                 ref="inputTextarea"
                 v-model="inputMessage"
                 class="conversation-view-textarea"
-                placeholder="本平台仅支持计算机网络相关知识点提问（如协议、TCP/IP、HTTP、DNS、SDN、路由、网络安全等），与课程无关的问题将无法解答。"
+                placeholder="本平台仅支持计算机网络相关知识点提问（如协议、TCP/IP、HTTP、DNS、SDN、路由、网络安全等），与课程无关的问题将无法解答。可附带上传配图。"
                 @input="adjustTextareaHeight"
                 @keydown.enter.exact.prevent="sendMessage"
                 @keydown.enter.shift.exact="handleShiftEnter"
@@ -184,7 +203,7 @@
               v-if="!isLoading || currentChatId !== activeRequestChatId"
               class="conversation-view-send-btn" 
               @click="sendMessage"
-              :disabled="!inputMessage.trim() || isLoading"
+              :disabled="(!inputMessage.trim() && !pendingConversationImage) || isLoading"
             >
               <i class="fa fa-paper-plane mr-2"></i>发送
             </button>
@@ -198,6 +217,7 @@
               <i class="fa fa-stop"></i> 停止
             </button>
             </div>
+            </div>
           </div>
         </div>
       </div>
@@ -209,8 +229,10 @@
 import { ref, computed, onMounted, nextTick, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { marked } from 'marked';
+import { message } from 'ant-design-vue';
+import { Image } from 'lucide-vue-next';
 import { courseChatStream, generateConversationTitle, listCourseKnowledgeBases, saveReadingPosition } from '@/apis/courseApi.js';
-import { agentApi, threadApi } from '@/apis';
+import { agentApi, threadApi, multimodalApi } from '@/apis';
 import { useUserStore } from '@/stores/user';
 import { useCourseConversationStore } from '@/stores/courseConversation';
 
@@ -218,6 +240,59 @@ const router = useRouter();
 const userStore = useUserStore();
 const store = useCourseConversationStore();
 const inputMessage = ref('');
+/** 待发送的课程对话配图 */
+const pendingConversationImage = ref(null);
+
+const pendingConversationImageThumbSrc = computed(() => {
+  const p = pendingConversationImage.value;
+  if (!p) return '';
+  if (p.thumbnailContent) return `data:image/jpeg;base64,${p.thumbnailContent}`;
+  const mime = p.mimeType || 'image/jpeg';
+  return `data:${mime};base64,${p.imageContent}`;
+});
+
+function conversationUserImageSrc(msg) {
+  if (!msg?.image_content) return '';
+  const mime = msg.image_mime_type || 'image/jpeg';
+  return `data:${mime};base64,${msg.image_content}`;
+}
+
+function clearPendingConversationImage() {
+  pendingConversationImage.value = null;
+}
+
+function pickConversationImage() {
+  if (store.isLoading && store.currentChatId === store.activeRequestChatId) return;
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = async (ev) => {
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      message.error('图片需小于 10MB');
+      return;
+    }
+    message.loading({ content: '正在处理图片…', key: 'course-conv-img' });
+    try {
+      const res = await multimodalApi.uploadImage(file);
+      if (res.success) {
+        pendingConversationImage.value = {
+          imageContent: res.image_content,
+          mimeType: res.mime_type || file.type || 'image/jpeg',
+          thumbnailContent: res.thumbnail_content
+        };
+        message.success({ content: '已添加配图', key: 'course-conv-img', duration: 2 });
+      } else {
+        message.error({ content: res.error || '图片处理失败', key: 'course-conv-img' });
+      }
+    } catch (_) {
+      message.error({ content: '图片上传失败', key: 'course-conv-img' });
+    }
+  };
+  input.click();
+}
+
 /** 启用网络搜索：与当前对话绑定，切换对话或切回页面时从 store 恢复 */
 const enableWebSearch = ref(false);
 /** 课程知识库列表（从接口拉取，用于 textbookPdfBookId 等） */
@@ -246,9 +321,22 @@ function renderMarkdown(text) {
 /** PDF 页索引 = 课本页码 + 11（封面等占前 11 页） */
 const TEXTBOOK_PAGE_OFFSET = 11;
 
+/** 将「对应课本页码：15、16」等裸数字转为 **15** 以便转成可点击的课本页链接 */
+function preprocessTextbookPageLineForMarkdown(text) {
+  if (!text || typeof text !== 'string') return text;
+  return text.replace(
+    /(对应课本页码[：:]\s*)(\d+(?:\s*[、，,]\s*\d+)*)/g,
+    (_, label, group) => {
+      const nums = group.match(/\d+/g);
+      if (!nums?.length) return label + group;
+      return label + nums.map((n) => `**${n}**`).join('、');
+    }
+  );
+}
+
 /** 渲染 AI 消息：将 **数字**（课本页码）转为链接——文案显示课本页，跳转使用 PDF 页（课本页码 + 11） */
 function renderMarkdownWithPageLinks(text) {
-  let html = renderMarkdown(text);
+  let html = renderMarkdown(preprocessTextbookPageLineForMarkdown(text));
   if (!html || !textbookPdfBookId.value) return html;
   const bookId = textbookPdfBookId.value;
   html = html.replace(/<strong>(\d+)<\/strong>/g, (_, page) => {
@@ -505,15 +593,28 @@ const deleteChat = async (chatId) => {
 // 流式回调内通过 store 更新状态，切到其他页面再切回时仍能保留对话且不打断输出
 const sendMessage = async () => {
   const content = inputMessage.value.trim();
-  if (!content || store.isLoading) return;
+  const imgSnap = pendingConversationImage.value;
+  if ((!content && !imgSnap) || store.isLoading) return;
 
   const chatIdForThisRequest = store.currentChatId;
   const chat = store.findChat(chatIdForThisRequest);
   if (!chat) return;
 
   store.setActiveRequestChatId(chatIdForThisRequest);
-  chat.messages.push({ role: 'user', content });
+  const userBubbleText = content || '（附图）';
+  chat.messages.push(
+    imgSnap
+      ? {
+          role: 'user',
+          content: userBubbleText,
+          message_type: 'multimodal_image',
+          image_content: imgSnap.imageContent,
+          image_mime_type: imgSnap.mimeType
+        }
+      : { role: 'user', content: userBubbleText }
+  );
   inputMessage.value = '';
+  pendingConversationImage.value = null;
   await nextTick();
   scrollToBottom();
 
@@ -650,7 +751,13 @@ const sendMessage = async () => {
           if (convStore.currentChatId === chatIdForThisRequest) nextTick(() => scrollToBottom());
         }
       },
-      { signal: controller.signal, enableWebSearch: store.currentChat?.enableWebSearch ?? enableWebSearch.value, knowledgeBase: DEFAULT_KNOWLEDGE_BASE_ID }
+      {
+        signal: controller.signal,
+        enableWebSearch: store.currentChat?.enableWebSearch ?? enableWebSearch.value,
+        knowledgeBase: DEFAULT_KNOWLEDGE_BASE_ID,
+        imageContent: imgSnap?.imageContent,
+        imageMimeType: imgSnap?.mimeType
+      }
     );
   } catch (error) {
     if (streamFlushTimer != null) {
@@ -1386,10 +1493,89 @@ const scrollToBottom = () => {
 
 .conversation-view-input-area {
   display: flex;
-  align-items: center;
-  gap: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   padding: 16px 24px;
   box-sizing: border-box;
+}
+
+.conversation-view-input-row {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  gap: 0;
+}
+
+.conversation-view-pending-img {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.conversation-view-pending-thumb {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--gray-200);
+}
+
+.conversation-view-pending-remove {
+  padding: 6px 12px;
+  font-size: 13px;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--gray-700);
+  cursor: pointer;
+}
+
+.conversation-view-img-btn {
+  flex-shrink: 0;
+  width: 48px;
+  min-height: 60px;
+  border: 1px solid var(--gray-200);
+  border-right: none;
+  border-bottom-left-radius: 8px;
+  border-top-left-radius: 8px;
+  background: var(--white);
+  color: var(--gray-700);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.conversation-view-img-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.conversation-view-img-btn-icon {
+  flex-shrink: 0;
+  color: var(--gray-700);
+  stroke-width: 2;
+}
+
+.conversation-view-user-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.conversation-view-user-img-wrap {
+  max-width: 240px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--gray-200);
+}
+
+.conversation-view-user-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
 }
 
 .conversation-view-textarea {
@@ -1397,8 +1583,9 @@ const scrollToBottom = () => {
   box-sizing: border-box;
   border: 1px solid var(--gray-200);
   border-right: none;
-  border-bottom-left-radius: 8px;
-  border-top-left-radius: 8px;
+  border-radius: 0;
+  border-bottom-left-radius: 0;
+  border-top-left-radius: 0;
   padding: 12px 16px;
   font-size: 16px;
   resize: none;

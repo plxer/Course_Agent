@@ -32,13 +32,19 @@ export async function courseChatStream(query, threadId = null, onChunk = null, o
     throw new Error('请先登录后再使用对话功能')
   }
 
-  const { signal, meta, enableWebSearch, knowledgeBase } = options
+  const { signal, meta, enableWebSearch, knowledgeBase, imageContent, imageMimeType } = options
   const body = { query, thread_id: threadId, meta: meta || {} }
   if (enableWebSearch !== undefined && enableWebSearch !== null) {
     body.enable_web_search = Boolean(enableWebSearch)
   }
   if (knowledgeBase !== undefined && knowledgeBase !== null && String(knowledgeBase).trim()) {
     body.knowledge_base = String(knowledgeBase).trim()
+  }
+  if (imageContent && String(imageContent).trim()) {
+    body.image_content = String(imageContent).trim()
+    if (imageMimeType && String(imageMimeType).trim()) {
+      body.image_mime_type = String(imageMimeType).trim()
+    }
   }
   const response = await fetch('/api/course/chat/stream', {
     method: 'POST',
@@ -96,6 +102,16 @@ export function getBookPages(bookId) {
 /** 课本某一页图片 URL */
 export function getBookPageUrl(bookId, pageNum) {
   return `/api/course/books/${encodeURIComponent(bookId)}/page/${pageNum}`
+}
+
+/** 课本解析插图列表（_page_*，reader_page = extract_page + 1，与伴读右上角页码一致） */
+export function listBookFigures(bookId) {
+  return apiGet(`/api/course/books/${encodeURIComponent(bookId)}/figures`, {}, false)
+}
+
+/** 单张解析插图 URL（query name 为文件名） */
+export function getBookFigureImageUrl(bookId, filename) {
+  return `/api/course/books/${encodeURIComponent(bookId)}/figure?name=${encodeURIComponent(filename)}`
 }
 
 /** 选中区域 OCR */

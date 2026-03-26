@@ -8,23 +8,30 @@
       <slot name="top"></slot>
     </div>
 
-    <div class="expand-options" v-if="hasOptionsLeft">
+    <div class="expand-options" v-if="showExpandBar">
+      <div v-if="hasOptionsInline" class="options-inline-wrap" @click.stop>
+        <slot name="options-inline"></slot>
+      </div>
       <a-popover
+        v-if="hasOptionsLeft"
         v-model:open="optionsExpanded"
         placement="bottomLeft"
         trigger="click"
         :overlay-inner-style="{ padding: '4px' }"
       >
         <template #content>
+          <div class="options-left-hint">文档附件或图片</div>
           <slot name="options-left">
             <div class="no-options">没有配置 options</div>
           </slot>
         </template>
-        <a-button type="text" class="expand-btn">
-          <template #icon>
-            <PlusOutlined :class="{ rotated: optionsExpanded }" />
-          </template>
-        </a-button>
+        <a-tooltip title="更多" placement="top">
+          <a-button type="text" class="expand-btn" aria-label="更多">
+            <template #icon>
+              <PlusOutlined :class="{ rotated: optionsExpanded }" />
+            </template>
+          </a-button>
+        </a-tooltip>
       </a-popover>
       <slot name="actions-left"></slot>
     </div>
@@ -412,6 +419,15 @@ const hasOptionsLeft = computed(() => {
   return Boolean(renderedNodes && renderedNodes.length)
 })
 
+const hasOptionsInline = computed(() => {
+  const slot = slots['options-inline']
+  if (!slot) return false
+  const renderedNodes = slot()
+  return Boolean(renderedNodes && renderedNodes.length)
+})
+
+const showExpandBar = computed(() => hasOptionsLeft.value || hasOptionsInline.value)
+
 const hasActionsLeft = computed(() => {
   const slot = slots['actions-left']
   if (!slot) {
@@ -634,14 +650,16 @@ defineExpose({
   gap: 0px;
   position: relative;
 
-  /* Default: Multi-line layout with top/bottom slots */
+  /* 多行模式：工具栏与输入框、发送键同一行（避免图标被挤到输入框下方难以发现） */
   padding: 0.8rem 0.75rem 0.6rem 0.75rem;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto 1fr auto;
   grid-template-rows: auto auto auto;
   grid-template-areas:
-    'top top'
-    'input input'
-    'options send';
+    'top top top'
+    'options input send'
+    'bottom bottom bottom';
+  align-items: center;
+  column-gap: 8px;
 
   .top-slot {
     display: flex;
@@ -654,19 +672,25 @@ defineExpose({
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-shrink: 0;
   }
 
   .user-input {
     grid-area: input;
+    margin-bottom: 0;
+    align-self: center;
+    min-width: 0;
   }
 
   .send-button-container {
     grid-area: send;
     justify-self: end;
+    flex-shrink: 0;
+    align-self: center;
   }
 
   .bottom-slot {
-    grid-column: 1 / -1;
+    grid-area: bottom;
   }
 
   // &:focus-within {
@@ -716,6 +740,11 @@ defineExpose({
   }
 }
 
+.options-inline-wrap {
+  display: flex;
+  align-items: center;
+}
+
 .expand-options {
   grid-area: options;
   display: flex;
@@ -729,7 +758,6 @@ defineExpose({
   background-color: transparent;
   border: none;
   margin: 0;
-  margin-bottom: 0.5rem;
   color: var(--gray-1000);
   font-size: 15px;
   outline: none;
@@ -738,6 +766,7 @@ defineExpose({
   font-family: inherit;
   min-height: 44px; /* Default min-height for multi-line */
   max-height: 200px;
+  margin-bottom: 0;
 
   &:focus {
     outline: none;
@@ -754,6 +783,16 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.options-left-hint {
+  max-width: 240px;
+  font-size: 12px;
+  color: var(--gray-500);
+  line-height: 1.45;
+  padding: 4px 4px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--gray-150);
 }
 
 .expand-btn {

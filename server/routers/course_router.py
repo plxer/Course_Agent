@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import fitz
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse, FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,6 +60,20 @@ def _knowledge_point_sampling_weight(wrong_attempts: int) -> float:
 _KNOWLEDGEBASE_DIR = os.environ.get("KNOWLEDGEBASE_DIR", "knowledgebase")
 _BOOKS_DIR = Path(_KNOWLEDGEBASE_DIR).resolve() / "books"
 _VIDEOS_DIR = Path(_KNOWLEDGEBASE_DIR).resolve() / "videos"
+
+# PDF 课本 id → knowledgebase 下 MinerU 导出目录（含 _page_*_Figure_*.jpeg，文件名内页码与伴读页码差 1：伴读显示页 = 文件名页码 + 1）
+_BOOK_FIGURES_SUBDIR_BY_BOOK_ID: dict[str, str] = {
+    "ComputerNetworking-TopDown-v8-2021": "ComputerNetworking-TopDown",
+}
+_FIGURE_FILENAME_RE = re.compile(r"^_page_(\d+)_(.+)\.(jpe?g|png)$", re.IGNORECASE)
+
+
+def _book_figures_root(book_id: str) -> Path | None:
+    sub = _BOOK_FIGURES_SUBDIR_BY_BOOK_ID.get(book_id)
+    if not sub:
+        return None
+    p = Path(_KNOWLEDGEBASE_DIR).resolve() / sub
+    return p if p.is_dir() else None
 
 
 def _books_dir() -> Path:
@@ -206,8 +220,11 @@ COURSE_KNOWLEDGE_BASES = [
     {"id": "computer_networking", "name": "计算机网络", "pdf_book_id": "ComputerNetworking-TopDown-v8-2021"},
 ]
 
-# 课程 Milvus 检索召回条数；筛选用「全局 top1 所在页 + 与 top_k 内页码 ±1 迭代相邻」的页
+# 课程 Milvus：未启用系统重排序时的向量召回条数；筛选用「重排或向量意义下的全局 top1 所在页
+# + 本批候选中出现过的页码 ±1 迭代相邻」闭包
 COURSE_MILVUS_RECALL_TOP_K = 8
+# 启用重排序时：先向量召回本池大小 → 重排模型精排 → 再交 top1 + 相邻页（final_top_k 与本值相同，避免先截断再扩页）
+COURSE_MILVUS_RERANK_POOL = 48
 
 
 class CourseChatRequest(BaseModel):
@@ -216,6 +233,9 @@ class CourseChatRequest(BaseModel):
     meta: dict = {}
     enable_web_search: bool | None = None  # 本次对话是否启用网络搜索，不传则用智能体/部门配置
     knowledge_base: str | None = None  # 课程知识库 id，如 "computer_networking" 表示先检索《计算机网络》课本再作答
+    # 与 /api/chat/image/upload 返回字段一致：纯 base64，不含 data: 前缀；需搭配多模态对话模型（如硅基流动 Qwen-VL 等）
+    image_content: str | None = None
+    image_mime_type: str | None = None  # 如 image/jpeg、image/png，缺省按 image/jpeg
 
 
 class ConversationTitleRequest(BaseModel):
@@ -269,6 +289,17 @@ def _course_query_tokens(query: str) -> list[str]:
     return [t for t in re.split(r"[\s,，;；、]+", (query or "").strip()) if len(t) >= 2][:16]
 
 
+def _course_chunk_sort_score(query: str, item: dict) -> float:
+    """排序用分数：若 Milvus 已做重排序则仅用 rerank_score，否则用向量分 + 轻量位置加权。"""
+    rs = item.get("rerank_score")
+    if rs is not None:
+        try:
+            return float(rs)
+        except (TypeError, ValueError):
+            pass
+    return _course_chunk_retrieval_score(query, item)
+
+
 def _course_chunk_retrieval_score(query: str, item: dict) -> float:
     """
     在向量相似度基础上做轻量加权：优先 query 词出现在段首/前部，或出现在小节标题行（# / 1.2 样式）。
@@ -296,15 +327,15 @@ def _course_chunk_retrieval_score(query: str, item: dict) -> float:
 
 def _course_chunks_top1_and_adjacent_pages(query: str, chunks: list[dict]) -> list[dict]:
     """
-    在 Milvus 召回的 top_k 内：
-    1）先按检索分排序，每页（book_page>=0）只保留一条最高分块；
+    在 Milvus 召回的一批候选内（若已重排序则按 rerank_score，否则按向量检索分）：
+    1）先排序，每页（book_page>=0）只保留一条最高分块；
     2）取全局最高分块为 top1；若其无有效页码，只返回该条；
-    3）否则在「本批召回里出现过的页码」中，迭代加入与已选集合相差 1 的页（7→8→9 闭包）。
+    3）否则在「本批候选中出现过的页码」中，迭代加入与已选集合相差 1 的页（7→8→9 闭包）。
     返回块按课本页码升序排列。
     """
     if not chunks:
         return []
-    ranked = sorted(chunks, key=lambda c: _course_chunk_retrieval_score(query, c), reverse=True)
+    ranked = sorted(chunks, key=lambda c: _course_chunk_sort_score(query, c), reverse=True)
 
     best_by_page: dict[int, dict] = {}
     best_orphans: dict[str, dict] = {}
@@ -321,7 +352,7 @@ def _course_chunks_top1_and_adjacent_pages(query: str, chunks: list[dict]) -> li
                 best_orphans[cid] = c
 
     representatives: list[dict] = list(best_by_page.values()) + list(best_orphans.values())
-    representatives.sort(key=lambda c: _course_chunk_retrieval_score(query, c), reverse=True)
+    representatives.sort(key=lambda c: _course_chunk_sort_score(query, c), reverse=True)
     top1 = representatives[0]
 
     meta1 = top1.get("metadata") or {}
@@ -371,11 +402,14 @@ async def _get_course_knowledge_context(query: str, kb_id: str, current_user) ->
         )
 
     try:
-        chunks = await kb_manager.aquery(
-            query,
-            milvus_db["db_id"],
-            final_top_k=COURSE_MILVUS_RECALL_TOP_K,
-        )
+        aq_kwargs: dict = {"final_top_k": COURSE_MILVUS_RECALL_TOP_K}
+        reranker_id = (getattr(conf, "reranker", None) or "").strip()
+        if getattr(conf, "enable_reranker", False) and reranker_id:
+            aq_kwargs["use_reranker"] = True
+            aq_kwargs["reranker_model"] = reranker_id
+            aq_kwargs["recall_top_k"] = COURSE_MILVUS_RERANK_POOL
+            aq_kwargs["final_top_k"] = COURSE_MILVUS_RERANK_POOL
+        chunks = await kb_manager.aquery(query, milvus_db["db_id"], **aq_kwargs)
     except Exception as e:
         logger.exception("Milvus 课程知识库检索失败: %s", e)
         raise HTTPException(
@@ -440,16 +474,87 @@ def _llm_answer_is_no_relevant(text: str) -> bool:
 
 
 # 命中则跳过 fast 模型相关性判断，避免小模型不认识缩写（如 SDN）而误拦
+# 词条覆盖 Kurose & Ross《自顶向下》各章：接入与物理介质、应用/传输/网络/链路/无线/安全等
 _COURSE_QUERY_NETWORKING_HINT_RE = re.compile(
     r"(sdn|openflow|nfv|软件定义网络|网络功能虚拟化|"
-    r"tcp/ip|\btcp\b|\budp\b|quic|http|https|dns|dhcp|ddos|"
-    r"bgp|ospf|\bisis\b|mpls|vlan|vpn|\bnat\b|\bgre\b|vxlan|"
-    r"socket|icmp|arp|mac地址|以太网|ieee\s*802|wi-?fi|无线局域网|蜂窝|"
-    r"ssl|tls|ipsec|防火墙|入侵检测|"
-    r"路由|路由器|交换机|协议|数据报|分组|拥塞|"
-    r"网络安全|网络层|链路层|传输层|运输层|应用层|物理层|"
-    r"cdn|p2p|流媒体|"
-    r"计算机网络|自顶向下)",
+    # --- Ch1 概论 / 接入 / 物理介质 / 核心 ---
+    r"互联网|万维网|网页|浏览器|电子邮件|电子信箱|邮箱|域名|"
+    r"端系统|主机|客户机|服务器|客户端|ISP|接入网|驻地网|宽带|"
+    r"数据中心|云计算|分布式应用|套接字|socket接口|"
+    r"分组交换|电路交换|报文|存储转发|分组|数据报|"
+    r"时延|延迟|排队|丢包|吞吐量|吞吐率|带宽|传播|传输时延|处理时延|端到端|"
+    r"协议栈|分层|体系结构|封装|解封装|"
+    r"频分|时分|码分|波分|复用|多路复用|解复用|"
+    r"调制解调|调制解调器|电缆调制解调|xDSL|\bdsl\b|"
+    r"光纤|光缆|光通信|光网络|单模|多模|双绞线|同轴|铜线|"
+    r"传输介质|物理介质|引导型|非引导型|有线|无线信道|"
+    r"卫星|微波|地理同步|低轨|"
+    r"fiber[- ]?optic|fibre[- ]?optic|\bfiber\b|\bfibre\b|"
+    r"twisted[- ]?pair|coaxial|guided|unguided|"
+    r"\bftth\b|\bhfc\b|\bpon\b|\baon\b|\bont\b|\bolt\b|docsis|\bcmts\b|dslam|"
+    r"multimode|single[- ]?mode|dwdm|cwdm|"
+    r"恶意软件|病毒|蠕虫|嗅探|欺骗|拒绝服务|"
+    r"ietf|\brfc\b|ieee\s*802|"
+    # --- Ch2 应用层 ---
+    r"http|https|quic|web缓存|代理|cookie|"
+    r"smtp|pop3|imap|mime|ftp|sftp|telnet|\bssh\b|nfs|"
+    r"dns|域名系统|域名解析|权威|递归|本地域名|"
+    r"p2p|对等网络|比特流|bittorrent|torrent|"
+    r"dash|流媒体|cdn|内容分发|akamai|"
+    r"mqtt|websocket|rtp\b|sip\b|html|uri\b|url\b|restful|"
+    # --- Ch3 传输层 ---
+    r"tcp/ip|\btcp\b|\budp\b|端口号|复用与分解|多路分解|"
+    r"可靠传输|流水线|回退N|选择重传|\bgbn\b|\bsr\b|go[- ]?back|selective repeat|"
+    r"校验和|序号|确认|重传|超时|往返|RTT|"
+    r"三次握手|四次挥手|连接建立|连接释放|"
+    r"流量控制|拥塞控制|慢启动|拥塞避免|快速重传|快速恢复|"
+    r"aimd|\breno\b|\bcubic\b|\bbbr\b|ecn|sack|"
+    # --- Ch4 网络层 数据面 ---
+    r"ipv4|ipv6|ip地址|子网|子网掩码|超网|cidr|前缀|最长前缀|"
+    r"默认网关|转发表|路由表|分片|mtu|"
+    r"\bnat\b|网络地址转换|"
+    r"middlebox|中间盒|"
+    r"match[- ]?action|流表|通用转发|"
+    # --- Ch5 控制面 / 路由 ---
+    r"路由|路由器|路由选择|路由算法|"
+    r"链路状态|距离向量|dijkstra|bellman[- ]?ford|"
+    r"ospf|bgp|自治系统|域内|域间|"
+    r"rip\b|eigrp|\bisis\b|"
+    r"icmp|igmp|任播|组播|多播|广播|单播|anycast|multicast|"
+    r"snmp|\bmib\b|netconf|yang|"
+    r"mpls|vpn|\bgre\b|vxlan|"
+    # --- Ch6 链路层 / 局域网 ---
+    r"链路层|数据链路|帧|差错检测|差错纠正|纠错|检错|"
+    r"奇偶|crc|循环冗余|汉明|"
+    r"多路访问|随机接入|轮流|令牌|"
+    r"csma|csma/cd|csma/ca|"
+    r"tdma|fdma|cdma|"
+    r"以太网|快速以太网|千兆以太网|万兆|"
+    r"mac地址|mac层|arp|地址解析|"
+    r"交换机|链路层交换机|透明桥|生成树|\bstp\b|vlan|虚拟局域网|"
+    r"ppp|hdlc|"
+    r"nic|网卡|"
+    # --- Ch7 无线与移动 ---
+    r"wi-?fi|无线局域网|wlan|802\.11|"
+    r"蓝牙|bluetooth|个域网|"
+    r"蜂窝|4g|5g|\blte\b|基站|毫微微|"
+    r"移动性|漫游|切换|handoff|mobile ip|移动ip|"
+    r"ofdm|mimo|"
+    # --- Ch8 安全 ---
+    r"ssl|tls|ipsec|ike|esp|\bah\b|"
+    r"对称密钥|公钥|加密|解密|数字签名|消息完整性|"
+    r"哈希|hmac|aes|rsa|sha[- ]?256|"
+    r"pgp|"
+    r"防火墙|入侵检测|入侵防御|ids|ips|waf|"
+    r"vpn|"
+    # --- 通用（与原有关键词合并） ---
+    r"socket|"
+    r"ddos|"
+    r"网络安全|网络层|运输层|传输层|应用层|物理层|"
+    r"协议|"
+    r"拥塞|"
+    r"计算机网络|自顶向下|计算机网络自顶向下|"
+    r"kurose|ross)",
     re.I,
 )
 
@@ -531,9 +636,17 @@ async def course_chat_stream(
             detail="本平台课程对话必须选择「计算机网络」知识库，不可选择「无」。请在上方选择「计算机网络」后再提问。",
         )
 
-    # 先检测问题是否与计算机网络相关，完全不相关则立即停止并提示，减少 token 浪费
-    if not await _is_query_related_to_computer_networking(
-        request.query, db=db, stats_user_id=current_user.id
+    q_raw = (request.query or "").strip()
+    has_image = bool((request.image_content or "").strip())
+    if not q_raw and not has_image:
+        raise HTTPException(status_code=400, detail="请输入文字问题或上传图片后再发送。")
+
+    # 纯图片时补全默认问法，便于检索与模型理解；有文字时沿用用户原文
+    query_for_llm = q_raw or "请结合《计算机网络》课本，说明附图在表达什么、图中各部分含义，并联系课本相关内容。"
+
+    # 带图时跳过纯文本相关性模型（无法看图），视为课程场景内有效提问
+    if not has_image and not await _is_query_related_to_computer_networking(
+        q_raw, db=db, stats_user_id=current_user.id
     ):
         raise HTTPException(
             status_code=400,
@@ -556,9 +669,10 @@ async def course_chat_stream(
     config = {"thread_id": thread_id}
     if request.enable_web_search is not None:
         config["enable_web_search"] = request.enable_web_search
-    # 已校验 kb_id 必选，检索课本并注入
+    # 已校验 kb_id 必选，检索课本并注入（仅图时用宽泛查询词召回课本摘录）
+    retrieval_query = q_raw if q_raw else "计算机网络 协议 体系结构 课本"
     context = await _get_course_knowledge_context(
-        request.query, kb_id, current_user
+        retrieval_query, kb_id, current_user
     )
     if context:
         config["course_knowledge_context"] = context
@@ -567,11 +681,11 @@ async def course_chat_stream(
         meta["request_id"] = str(uuid.uuid4())
     meta.update(
         {
-            "query": request.query,
+            "query": query_for_llm,
             "agent_id": agent_id,
             "thread_id": thread_id,
             "user_id": current_user.id,
-            "has_image": False,
+            "has_image": has_image,
         }
     )
     # 前端可传 meta.source（如 "reading"），写入对话 metadata，问答页列表会排除 source=reading
@@ -579,10 +693,11 @@ async def course_chat_stream(
     return StreamingResponse(
         stream_agent_chat(
             agent_id=agent_id,
-            query=request.query,
+            query=query_for_llm,
             config=config,
             meta=meta,
-            image_content=None,
+            image_content=request.image_content.strip() if has_image else None,
+            image_mime_type=(request.image_mime_type or "").strip() or None,
             current_user=current_user,
             db=db,
         ),
@@ -644,6 +759,70 @@ def get_book_page_image(book_id: str, page_num: int):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"无法渲染页面: {e!s}") from e
+
+
+# --- 课本解析插图（与 md 中 ![](_page_N_...) 同源，不依赖 meta.json 坐标）---
+
+
+@course.get("/books/{book_id}/figures")
+def list_book_extracted_figures(book_id: str):
+    """列出 knowledgebase 下该课本对应的 _page_* 插图及伴读页码映射（reader_page = extract_page + 1）。"""
+    root = _book_figures_root(book_id)
+    if not root:
+        return {"figures": []}
+    out: list[dict[str, Any]] = []
+
+    def _sort_key(p: Path) -> tuple[int, str]:
+        m = _FIGURE_FILENAME_RE.match(p.name)
+        if not m:
+            return (10**9, p.name)
+        return (int(m.group(1)), p.name)
+
+    try:
+        for f in sorted(root.iterdir(), key=_sort_key):
+            if not f.is_file():
+                continue
+            m = _FIGURE_FILENAME_RE.match(f.name)
+            if not m:
+                continue
+            extract_page = int(m.group(1))
+            stem_part = m.group(2)
+            reader_page = extract_page + 1
+            label = f"第{reader_page}页 · {stem_part.replace('_', ' ')}"
+            out.append(
+                {
+                    "filename": f.name,
+                    "extract_page": extract_page,
+                    "reader_page": reader_page,
+                    "label": label,
+                }
+            )
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"无法列出插图: {e!s}") from e
+    return {"figures": out}
+
+
+@course.get("/books/{book_id}/figure")
+def get_book_extracted_figure(book_id: str, name: str = Query(..., description="插图文件名，如 _page_18_Figure_1.jpeg")):
+    """返回课本解析目录中的单张插图（仅允许 _page_* 白名单文件名）。"""
+    if not name or Path(name).name != name or ".." in name:
+        raise HTTPException(status_code=400, detail="无效文件名")
+    if not _FIGURE_FILENAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="非允许的课本插图文件名")
+    root = _book_figures_root(book_id)
+    if not root:
+        raise HTTPException(status_code=404, detail="该课本无解析插图目录")
+    path = (root / name).resolve()
+    root_r = root.resolve()
+    try:
+        path.relative_to(root_r)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail="插图不存在") from e
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="插图不存在")
+    lower = name.lower()
+    media = "image/png" if lower.endswith(".png") else "image/jpeg"
+    return FileResponse(path, media_type=media, filename=name)
 
 
 # --- 选区 OCR ---

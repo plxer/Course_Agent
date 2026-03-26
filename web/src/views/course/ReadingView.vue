@@ -288,14 +288,14 @@
             </div>
           </div>
           
-          <div class="reading-chat-messages" ref="chatMessagesBox">
+          <div class="reading-chat-messages" ref="chatMessagesBox" @click="onReadingChatPageLinkClick">
             <!-- AI欢迎消息 -->
             <div v-if="chatMessages.length === 0" class="reading-chat-message ai">
               <div class="reading-chat-avatar ai" title="AI 助手">
                 <svg class="reading-avatar-robot" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h2v1h2v2h2v2h1c.55 0 1 .45 1 1v2h1v2h-1v2H4v-2H3v-2h1v-2c0-.55.45-1 1-1h1v-2h2V8h2V7h2V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M8 18h8v-2H8v2m-1-5h2v2H7v-2m8 0v2h-2v-2h2m-3-3h2v2h-2v-2m-4 0v2H7v-2h2z"/></svg>
               </div>
               <div class="reading-chat-content ai">
-                <div class="reading-chat-text">你好！我是课程智能体，很高兴为你解答《计算机网络》学习中的问题。你可以选择文本后发送到对话，或直接输入问题。</div>
+                <div class="reading-chat-text">你好！我是课程智能体，很高兴为你解答《计算机网络》学习中的问题。你可以框选文本后「问问AI」、直接输入问题，或使用下方图片按钮上传配图（需选用支持视觉的多模态对话模型）。</div>
               </div>
             </div>
 
@@ -310,11 +310,16 @@
                 <svg class="reading-avatar-robot" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h2v1h2v2h2v2h1c.55 0 1 .45 1 1v2h1v2h-1v2H4v-2H3v-2h1v-2c0-.55.45-1 1-1h1v-2h2V8h2V7h2V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M8 18h8v-2H8v2m-1-5h2v2H7v-2m8 0v2h-2v-2h2m-3-3h2v2h-2v-2m-4 0v2H7v-2h2z"/></svg>
               </div>
               <div class="reading-chat-content" :class="msg.role">
-                <div v-if="msg.role === 'user'" class="reading-chat-text">{{ msg.content }}</div>
+                <div v-if="msg.role === 'user'" class="reading-chat-user-msg">
+                <div v-if="msg.image_content" class="reading-chat-user-img-wrap">
+                  <img :src="readingUserImageSrc(msg)" alt="" class="reading-chat-user-img" />
+                </div>
+                <div v-if="msg.content" class="reading-chat-text">{{ msg.content }}</div>
+              </div>
                 <div
                   v-else-if="msg.role === 'ai' && msg.content"
                   class="reading-chat-text reading-chat-markdown"
-                  v-html="renderMarkdown(msg.content)"
+                  v-html="renderMarkdownWithPageLinks(msg.content)"
                 />
               </div>
               <div v-if="msg.role === 'user'" class="reading-chat-avatar user">
@@ -332,7 +337,7 @@
                   v-if="currentChatMessage"
                   :key="`reading-loading-${currentChatMessage.length}`"
                   class="reading-chat-text reading-chat-markdown"
-                  v-html="renderMarkdown(currentChatMessage)"
+                  v-html="renderMarkdownWithPageLinks(currentChatMessage)"
                 />
                 <div v-else class="reading-chat-typing">
                   <span></span>
@@ -345,11 +350,46 @@
 
           <!-- 输入区域 -->
           <div class="reading-chat-input-area">
+            <div v-if="pendingChatImage" class="reading-chat-pending-img">
+              <img :src="pendingChatImageThumbSrc" alt="" class="reading-chat-pending-thumb" />
+              <button type="button" class="reading-chat-pending-remove" @click="clearPendingChatImage">移除图片</button>
+            </div>
+            <div class="reading-chat-input-row">
+            <a-dropdown
+              v-if="figuresOnCurrentPage.length > 0"
+              :trigger="['click']"
+              :disabled="isChatLoading"
+              placement="topLeft"
+            >
+              <button
+                type="button"
+                class="reading-chat-img-btn"
+                title="本页插图"
+                :disabled="isChatLoading"
+                @click.stop
+              >
+                <Images :size="20" aria-hidden="true" />
+              </button>
+              <template #overlay>
+                <a-menu @click="onReadingFigureMenuClick">
+                  <a-menu-item v-for="f in figuresOnCurrentPage" :key="f.filename">{{ f.label }}</a-menu-item>
+                </a-menu>
+              </template>
+            </a-dropdown>
+            <button
+              type="button"
+              class="reading-chat-img-btn"
+              title="选择图片"
+              :disabled="isChatLoading"
+              @click="pickChatImage"
+            >
+              <Image :size="20" aria-hidden="true" />
+            </button>
             <textarea 
               ref="chatTextarea"
               v-model="chatInputMessage" 
               class="reading-chat-textarea" 
-              placeholder="本平台仅支持计算机网络相关知识点提问（如协议、TCP/IP、HTTP、DNS、SDN、路由、网络安全等），与课程无关的问题将无法解答。"
+              placeholder="本平台仅支持计算机网络相关知识点提问（如协议、TCP/IP、HTTP、DNS、SDN、路由、网络安全等），与课程无关的问题将无法解答。可附带上传配图。"
               @input="adjustTextareaHeight"
               @keydown.enter.exact.prevent="sendChatMessage"
               @keydown.enter.shift.exact="handleShiftEnter"
@@ -358,7 +398,7 @@
               v-if="!isChatLoading"
               class="reading-chat-send-btn" 
               @click="sendChatMessage"
-              :disabled="!chatInputMessage.trim()"
+              :disabled="!chatInputMessage.trim() && !pendingChatImage"
             >
               发送
             </button>
@@ -371,6 +411,7 @@
             >
               停止
             </button>
+            </div>
           </div>
         </div>
 
@@ -403,10 +444,12 @@
 import { ref, onMounted, computed, nextTick, h, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { marked } from 'marked';
+import { Image, Images } from 'lucide-vue-next';
+import { message } from 'ant-design-vue';
 import { LeftOutlined, RightOutlined, ArrowLeftOutlined, CommentOutlined, CloseOutlined, DeleteOutlined, TranslationOutlined } from '@ant-design/icons-vue';
-import { listBooks, getBookPages, getBookPageUrl, ocrTextSelection, courseChatStream, translateText as translateTextApi, getReadingPosition as getReadingPositionApi, saveReadingPosition as saveReadingPositionApi } from '@/apis/courseApi.js';
+import { listBooks, getBookPages, getBookPageUrl, listBookFigures, getBookFigureImageUrl, ocrTextSelection, courseChatStream, translateText as translateTextApi, getReadingPosition as getReadingPositionApi, saveReadingPosition as saveReadingPositionApi } from '@/apis/courseApi.js';
 import { useUserStore } from '@/stores/user';
-import { agentApi, threadApi } from '@/apis/agent_api.js';
+import { agentApi, threadApi, multimodalApi } from '@/apis/agent_api.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -419,6 +462,50 @@ function renderMarkdown(text) {
   return marked.parse(text, { gfm: true, breaks: true });
 }
 
+/** 与课程对话页一致：课本页码 + 11 = PDF 页 */
+const TEXTBOOK_PAGE_OFFSET = 11;
+
+function preprocessTextbookPageLineForMarkdown(text) {
+  if (!text || typeof text !== 'string') return text;
+  return text.replace(
+    /(对应课本页码[：:]\s*)(\d+(?:\s*[、，,]\s*\d+)*)/g,
+    (_, label, group) => {
+      const nums = group.match(/\d+/g);
+      if (!nums?.length) return label + group;
+      return label + nums.map((n) => `**${n}**`).join('、');
+    }
+  );
+}
+
+function renderMarkdownWithPageLinks(text) {
+  const bookId = selectedBook.value?.id;
+  let html = renderMarkdown(preprocessTextbookPageLineForMarkdown(text));
+  if (!html || !bookId) return html;
+  html = html.replace(/<strong>(\d+)<\/strong>/g, (_, page) => {
+    const printed = parseInt(page, 10);
+    const pdfPage = printed + TEXTBOOK_PAGE_OFFSET;
+    return `<a href="/reading?book=${encodeURIComponent(bookId)}&page=${pdfPage}&from=reading" class="reading-chat-page-link" data-book-id="${encodeURIComponent(bookId)}" data-page="${pdfPage}">第${printed}页</a>`;
+  });
+  html = html.replace(/<\/a>\s*页/g, '</a>');
+  return html;
+}
+
+function onReadingChatPageLinkClick(e) {
+  const link = e.target.closest('.reading-chat-page-link');
+  if (!link) return;
+  e.preventDefault();
+  const bookId = link.getAttribute('data-book-id');
+  const pageStr = link.getAttribute('data-page');
+  if (!bookId || !pageStr) return;
+  const pdfPage = parseInt(pageStr, 10);
+  if (Number.isNaN(pdfPage)) return;
+  if (selectedBook.value?.id === bookId) {
+    goToPage(pdfPage);
+  } else {
+    router.push({ path: '/reading', query: { book: bookId, page: String(pdfPage), from: 'reading' } });
+  }
+}
+
 const books = ref([]);
 // 分类：第 1 本指定课本；第 2 本拓展阅读；其余为讲义
 const courseTextbooks = computed(() => books.value.filter((b) => b.book_type === 'course_textbook'));
@@ -426,6 +513,8 @@ const supplementBooks = computed(() => books.value.filter((b) => b.book_type ===
 const handoutBooks = computed(() => books.value.filter((b) => b.book_type === 'handout'));
 const selectedBook = ref(null);
 const currentPage = ref(1);
+/** MinerU 导出插图列表；伴读右上角页码 = reader_page（= 文件名 _page_N 中的 N + 1） */
+const bookFigures = ref([]);
 const totalPages = ref(0);
 const currentPageImage = ref('');
 const jumpPageInput = ref(null); // 页面跳转输入框的值
@@ -441,6 +530,29 @@ const selectedText = ref('');
 const isSelecting = ref(false);
 const finalSelectionPosition = ref({ left: 0, top: 0, width: 0, height: 0 });
 const isOcrProcessing = ref(false); // 防止重复 OCR 请求
+
+const figuresOnCurrentPage = computed(() =>
+  bookFigures.value.filter((f) => f.reader_page === currentPage.value)
+);
+
+async function loadBookFiguresForReading(bookId) {
+  bookFigures.value = [];
+  if (!bookId) return;
+  try {
+    const res = await listBookFigures(bookId);
+    bookFigures.value = Array.isArray(res?.figures) ? res.figures : [];
+  } catch (_) {
+    bookFigures.value = [];
+  }
+}
+
+watch(
+  () => selectedBook.value?.id,
+  (id) => {
+    loadBookFiguresForReading(id);
+  },
+  { immediate: true }
+);
 
 // 对话面板相关（按课本分离：每个 bookId 独立一份对话；当前展示用 chatMessages/chatThreadId 与当前课本同步）
 const showChatPanel = ref(false);
@@ -470,6 +582,87 @@ const chatMessagesBox = ref(null);
 const chatTextarea = ref(null);
 const currentChatMessage = ref('');
 const chatStreamController = ref(null);
+
+/** 待发送的配图（走 /api/chat/image/upload，与课程流式接口的 image_content 一致） */
+const pendingChatImage = ref(null);
+
+const pendingChatImageThumbSrc = computed(() => {
+  const p = pendingChatImage.value;
+  if (!p) return '';
+  if (p.thumbnailContent) return `data:image/jpeg;base64,${p.thumbnailContent}`;
+  const mime = p.mimeType || 'image/jpeg';
+  return `data:${mime};base64,${p.imageContent}`;
+});
+
+function readingUserImageSrc(msg) {
+  if (!msg?.image_content) return '';
+  const mime = msg.image_mime_type || 'image/jpeg';
+  return `data:${mime};base64,${msg.image_content}`;
+}
+
+function clearPendingChatImage() {
+  pendingChatImage.value = null;
+}
+
+async function uploadImageFileToPending(file) {
+  if (!file || isChatLoading.value) return;
+  if (file.size > 10 * 1024 * 1024) {
+    message.error('图片需小于 10MB');
+    return;
+  }
+  if (!file.type.startsWith('image/')) {
+    message.error('请选择有效的图片文件');
+    return;
+  }
+  message.loading({ content: '正在处理图片…', key: 'course-reading-img' });
+  try {
+    const res = await multimodalApi.uploadImage(file);
+    if (res.success) {
+      pendingChatImage.value = {
+        imageContent: res.image_content,
+        mimeType: res.mime_type || file.type || 'image/jpeg',
+        thumbnailContent: res.thumbnail_content
+      };
+      message.success({ content: '已添加配图', key: 'course-reading-img', duration: 2 });
+    } else {
+      message.error({ content: res.error || '图片处理失败', key: 'course-reading-img' });
+    }
+  } catch (_) {
+    message.error({ content: '图片上传失败', key: 'course-reading-img' });
+  }
+}
+
+function pickChatImage() {
+  if (isChatLoading.value) return;
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = async (ev) => {
+    try {
+      const file = ev.target.files?.[0];
+      if (file) await uploadImageFileToPending(file);
+    } finally {
+      if (input.parentNode) input.parentNode.removeChild(input);
+    }
+  };
+  document.body.appendChild(input);
+  input.click();
+}
+
+async function onReadingFigureMenuClick({ key }) {
+  const filename = key != null ? String(key) : '';
+  if (!filename || isChatLoading.value || !selectedBook.value?.id) return;
+  const url = getBookFigureImageUrl(selectedBook.value.id, filename);
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(String(r.status));
+    const blob = await r.blob();
+    const file = new File([blob], filename, { type: blob.type || 'image/jpeg' });
+    await uploadImageFileToPending(file);
+  } catch (_) {
+    message.error({ content: '插图加载失败', key: 'course-reading-fig', duration: 2 });
+  }
+}
 
 /** 默认智能体 ID，用于拉取课本伴读对话列表与历史 */
 const defaultAgentId = ref(null);
@@ -1092,9 +1285,10 @@ const clearBookChatContext = () => {
 // 发送对话消息
 const sendChatMessage = async () => {
   const content = chatInputMessage.value.trim();
+  const imgSnap = pendingChatImage.value;
   console.log('sendChatMessage 被调用, content:', content, 'isChatLoading:', isChatLoading.value);
   
-  if (!content) {
+  if (!content && !imgSnap) {
     console.warn('消息内容为空，无法发送');
     return;
   }
@@ -1112,10 +1306,21 @@ const sendChatMessage = async () => {
     chatMessages.value = chat.messages;
   }
 
-  // 添加用户消息
-  chat.messages.push({ role: 'user', content });
-  const messageToSend = content; // 保存要发送的内容
+  const userBubbleText = content || '（附图）';
+  const messageToSend = content;
+  chat.messages.push(
+    imgSnap
+      ? {
+          role: 'user',
+          content: userBubbleText,
+          message_type: 'multimodal_image',
+          image_content: imgSnap.imageContent,
+          image_mime_type: imgSnap.mimeType
+        }
+      : { role: 'user', content: userBubbleText }
+  );
   chatInputMessage.value = '';
+  pendingChatImage.value = null;
   
   // 滚动到底部
   await nextTick();
@@ -1167,7 +1372,9 @@ const sendChatMessage = async () => {
         book_type: book.book_type,
         book_label: book.book_label
       },
-      knowledgeBase: 'computer_networking'
+      knowledgeBase: 'computer_networking',
+      imageContent: imgSnap?.imageContent,
+      imageMimeType: imgSnap?.mimeType
     }
     );
   } catch (error) {
@@ -2057,6 +2264,16 @@ onMounted(async () => {
 .reading-chat-markdown strong {
   font-weight: 700;
 }
+.reading-chat-markdown .reading-chat-page-link {
+  color: var(--primary-color);
+  text-decoration: none;
+  font-weight: 600;
+  border-bottom: 1px solid var(--primary-color);
+  cursor: pointer;
+}
+.reading-chat-markdown .reading-chat-page-link:hover {
+  text-decoration: underline;
+}
 .reading-chat-markdown p {
   margin: 0 0 0.5em;
 }
@@ -2120,10 +2337,83 @@ onMounted(async () => {
   padding: 16px 24px;
   border-top: 1px solid var(--gray-200);
   display: flex;
-  gap: 12px;
-  align-items: center;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
   background-color: var(--white);
   box-sizing: border-box;
+}
+
+.reading-chat-input-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  width: 100%;
+}
+
+.reading-chat-pending-img {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.reading-chat-pending-thumb {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--gray-200);
+}
+
+.reading-chat-pending-remove {
+  padding: 6px 12px;
+  font-size: 13px;
+  border: 1px solid var(--gray-300);
+  border-radius: 6px;
+  background: var(--white);
+  color: var(--dark-text);
+  cursor: pointer;
+}
+
+.reading-chat-img-btn {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--gray-300);
+  border-radius: 8px;
+  background: var(--white);
+  color: var(--dark-text);
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
+.reading-chat-img-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.reading-chat-user-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.reading-chat-user-img-wrap {
+  max-width: 220px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--gray-200);
+}
+
+.reading-chat-user-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
 }
 
 .reading-chat-textarea {
