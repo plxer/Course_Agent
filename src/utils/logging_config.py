@@ -52,12 +52,24 @@ def _setup_logging_bridge():
         lib_logger.propagate = False
 
 
+def _loguru_enqueue() -> bool:
+    """是否对 loguru 使用异步队列（会各启一线程）。Docker/低配 cgroup 下易 cannot start new thread，默认关。"""
+    v = os.environ.get("LOGURU_ENQUEUE", "").strip().lower()
+    if v in ("1", "true", "yes"):
+        return True
+    if v in ("0", "false", "no"):
+        return False
+    return os.environ.get("RUNNING_IN_DOCKER", "").strip().lower() not in ("1", "true", "yes")
+
+
 def setup_logger(name, level="DEBUG", console=True):
     """使用 loguru 设置日志记录器"""
     os.makedirs(f"{SAVE_DIR}/logs", exist_ok=True)
 
     # 移除默认的 handler
     loguru_logger.remove()
+
+    _enqueue = _loguru_enqueue()
 
     # 添加文件日志（无颜色）
     loguru_logger.add(
@@ -68,7 +80,7 @@ def setup_logger(name, level="DEBUG", console=True):
         rotation="10 MB",
         retention="30 days",
         compression="zip",
-        enqueue=True,
+        enqueue=_enqueue,
     )
 
     # 添加控制台日志（有颜色）
@@ -83,7 +95,7 @@ def setup_logger(name, level="DEBUG", console=True):
                 "<level>{message}</level>"
             ),
             colorize=True,
-            enqueue=True,
+            enqueue=_enqueue,
         )
 
     return loguru_logger

@@ -17,6 +17,29 @@ async def test_login_with_invalid_credentials(test_client):
     assert "detail" in response.json()
 
 
+async def test_login_with_display_username_not_only_user_id(test_client, admin_headers):
+    """注册/创建用户时的「显示用户名」应可作为登录标识（与仅支持 user_id/手机时用户用原名登录失败的问题一致）。"""
+    suffix = uuid.uuid4().hex[:8]
+    display_name = f"测登_{suffix}"
+    password = "TestPass123!"
+    payload = {
+        "username": display_name,
+        "password": password,
+        "role": "user",
+    }
+    create_response = await test_client.post("/api/auth/users", json=payload, headers=admin_headers)
+    assert create_response.status_code == 200, create_response.text
+    created = create_response.json()
+    assert created["username"] == display_name
+    # 使用显示名登录（不用系统生成的 user_id）
+    login_response = await test_client.post(
+        "/api/auth/token",
+        data={"username": display_name, "password": password},
+    )
+    assert login_response.status_code == 200, login_response.text
+    assert login_response.json()["username"] == display_name
+
+
 async def test_admin_can_login_and_fetch_profile(test_client, admin_headers):
     profile_response = await test_client.get("/api/auth/me", headers=admin_headers)
     assert profile_response.status_code == 200

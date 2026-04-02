@@ -78,6 +78,10 @@ lint.select = [         # 选择的规则
 ]
 
 [tool.uv]
+# 排除传递依赖里的 opencv-python（需 libGL），仅用 opencv-python-headless；见 astral-sh/uv#14220
+override-dependencies = [
+    "opencv-python; python_version < '0'",
+]
 
 [[tool.uv.index]]
 name = "tsinghua"

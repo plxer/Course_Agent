@@ -18,26 +18,10 @@ ENV TZ=Asia/Shanghai \
     FLAGS_use_onednn=0 \
     PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT=0
 
-RUN npm install -g npm@latest && npm cache clean --force
+# 跳过全局升级 npm：少数 Docker/内核环境下会触发 Node 线程创建断言失败；node:20-slim 自带 npm 已够用。
 
-# 设置代理和时区，更换镜像源，安装系统依赖 - 合并为一个RUN减少层数
-RUN set -ex \
-    # (A) 设置时区
-    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
-    # (B) 替换清华源 (针对 Debian Bookworm 的新版格式)
-    && sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
-    && sed -i 's|security.debian.org/debian-security|mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources \
-    # (C) 安装必要的系统库
-    && apt-get update \
-    && apt-get install -y --no-install-recommends --fix-missing \
-        curl \
-        ffmpeg \
-        libsm6 \
-        libxext6 \
-    # (D) 清理垃圾，减小体积
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
+# 时区（不跑 apt：低配构建易 lzma OOM；OpenCV 见 pyproject 里 opencv-python 覆盖为 headless）
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # 复制项目配置文件
 COPY ../pyproject.toml /app/pyproject.toml
@@ -45,10 +29,8 @@ COPY ../.python-version /app/.python-version
 COPY ../uv.lock /app/uv.lock
 
 # 如果网络还是不好，可以在后面添加 --index-url https://pypi.tuna.tsinghua.edu.cn/simple
-# 含 --group paddle 以启用课本伴读 PaddleOCR（构建时解析安装，无需预先锁入 uv.lock）
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --frozen && \
-    uv sync --no-dev --group paddle
+# 课本伴读 PaddleOCR：在下一行追加 `&& uv sync --no-dev --group paddle`（旧版 Docker 勿用 RUN --mount，需先 DOCKER_BUILDKIT=1）
+RUN uv sync --no-dev --frozen
 
 # 激活虚拟环境并添加到PATH
 ENV PATH="/app/.venv/bin:$PATH"

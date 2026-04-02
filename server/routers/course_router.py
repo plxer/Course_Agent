@@ -56,10 +56,25 @@ def _knowledge_point_sampling_weight(wrong_attempts: int) -> float:
     return 1.0 + math.sqrt(w)
 
 
-# 课本目录：环境变量 KNOWLEDGEBASE_DIR 或默认 knowledgebase（相对项目根）
-_KNOWLEDGEBASE_DIR = os.environ.get("KNOWLEDGEBASE_DIR", "knowledgebase")
-_BOOKS_DIR = Path(_KNOWLEDGEBASE_DIR).resolve() / "books"
-_VIDEOS_DIR = Path(_KNOWLEDGEBASE_DIR).resolve() / "videos"
+# 课本/视频根目录：KNOWLEDGEBASE_DIR 可设为绝对路径或相对「项目根」的片段。
+# 默认 <项目根>/knowledgebase，按本文件位置解析项目根，不依赖进程 cwd（避免从子目录启动时找不到 books）。
+_COURSE_ROUTER_DIR = Path(__file__).resolve()
+_PROJECT_ROOT = _COURSE_ROUTER_DIR.parents[2]  # server/routers/course_router.py
+
+
+def _resolved_knowledgebase_dir() -> Path:
+    raw = os.environ.get("KNOWLEDGEBASE_DIR", "").strip()
+    if not raw:
+        return (_PROJECT_ROOT / "knowledgebase").resolve()
+    p = Path(raw)
+    if p.is_absolute():
+        return p
+    return (_PROJECT_ROOT / p).resolve()
+
+
+_KNOWLEDGEBASE_DIR = _resolved_knowledgebase_dir()
+_BOOKS_DIR = _KNOWLEDGEBASE_DIR / "books"
+_VIDEOS_DIR = _KNOWLEDGEBASE_DIR / "videos"
 
 # PDF 课本 id → knowledgebase 下 MinerU 导出目录（含 _page_*_Figure_*.jpeg，文件名内页码与伴读页码差 1：伴读显示页 = 文件名页码 + 1）
 _BOOK_FIGURES_SUBDIR_BY_BOOK_ID: dict[str, str] = {
@@ -72,7 +87,7 @@ def _book_figures_root(book_id: str) -> Path | None:
     sub = _BOOK_FIGURES_SUBDIR_BY_BOOK_ID.get(book_id)
     if not sub:
         return None
-    p = Path(_KNOWLEDGEBASE_DIR).resolve() / sub
+    p = _KNOWLEDGEBASE_DIR / sub
     return p if p.is_dir() else None
 
 
@@ -711,7 +726,14 @@ async def course_chat_stream(
 @course.get("/books")
 def list_books():
     """课本列表：knowledgebase/books 下的 PDF。"""
-    return {"books": _list_pdf_books()}
+    items = _list_pdf_books()
+    if not items:
+        logger.warning(
+            "课本列表为空: books_dir=%s is_dir=%s (Docker 需挂载 knowledgebase，例如 ./knowledgebase:/app/knowledgebase)",
+            _BOOKS_DIR,
+            _BOOKS_DIR.is_dir(),
+        )
+    return {"books": items}
 
 
 # --- 课本页数 ---

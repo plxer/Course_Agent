@@ -136,8 +136,11 @@
           </section>
         </template>
 
+        <div v-else-if="booksLoadError" class="reading-empty reading-empty--error">
+          <p>{{ booksLoadError }}</p>
+        </div>
         <div v-else class="reading-empty">
-          <p>暂无课本，请将 PDF 文件放入 knowledgebase/books 文件夹</p>
+          <p>暂无课本，请将 PDF 文件放入项目根目录下 knowledgebase/books 文件夹（Docker 部署请挂载该目录到容器内 /app/knowledgebase）</p>
         </div>
       </div>
     </main>
@@ -507,6 +510,8 @@ function onReadingChatPageLinkClick(e) {
 }
 
 const books = ref([]);
+/** 拉取 /api/course/books 失败或返回非预期时展示，避免与「目录无 PDF」混淆 */
+const booksLoadError = ref(null);
 // 分类：第 1 本指定课本；第 2 本拓展阅读；其余为讲义
 const courseTextbooks = computed(() => books.value.filter((b) => b.book_type === 'course_textbook'));
 const supplementBooks = computed(() => books.value.filter((b) => b.book_type === 'supplement'));
@@ -779,18 +784,27 @@ const selectionBarStyle = computed(() => {
 
 // 加载课本列表
 const loadBooks = async () => {
+  booksLoadError.value = null;
   try {
     console.log('开始加载课本列表...');
     const response = await listBooks();
     console.log('API响应:', response);
-    books.value = response?.books || [];
+    if (response == null || typeof response !== 'object' || !Array.isArray(response.books)) {
+      books.value = [];
+      booksLoadError.value =
+        '课本接口返回异常（常见原因：未通过同一站点访问 /api，或反向代理未把 /api 转到后端）。请从带 nginx 的 Web 入口打开，或检查 Vite 代理与 compose 挂载。';
+      console.warn('课本列表响应非 JSON 或缺少 books 数组:', response);
+      return;
+    }
+    books.value = response.books;
     console.log('加载的课本数量:', books.value.length);
     if (books.value.length === 0) {
-      console.warn('未找到课本，响应数据:', response);
+      console.warn('未找到课本（后端 books 目录下无 PDF 或未挂载 knowledgebase），响应:', response);
     }
   } catch (error) {
     console.error('加载课本列表失败:', error);
     books.value = [];
+    booksLoadError.value = error?.message || '无法加载课本列表，请确认后端已启动且可访问 /api/course/books';
   }
 };
 
@@ -1733,6 +1747,10 @@ onMounted(async () => {
   text-align: center;
   padding: 40px;
   color: var(--gray-500);
+}
+
+.reading-empty--error {
+  color: #c53030;
 }
 
 /* PDF 阅读器样式 */

@@ -27,7 +27,7 @@ export const useUserStore = defineStore('user', () => {
   async function login(credentials) {
     try {
       const formData = new FormData()
-      // 支持user_id或phone_number登录
+      // 支持 user_id、显示用户名（username）或手机号登录
       formData.append('username', credentials.loginId) // 使用loginId作为通用登录标识
       formData.append('password', credentials.password)
 

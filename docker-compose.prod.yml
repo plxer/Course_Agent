@@ -6,12 +6,16 @@ services:
     image: yuxi-api:0.5.prod
     container_name: api-prod
     working_dir: /app
+    security_opt:
+      - seccomp:unconfined
     networks:
       - app-network
     volumes:
       - ./saves:/app/saves
+      # 课本伴读 / 视频伴读：与 dev 一致，挂载主机 knowledgebase（含 books/*.pdf、videos、MinerU 插图目录等）
+      - ./knowledgebase:/app/knowledgebase
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:${HOST_GATEWAY:-172.17.0.1}"
     env_file:
       - .env.prod
     environment:
@@ -32,15 +36,31 @@ services:
       - MINIO_URI=${MINIO_URI:-http://milvus-minio:9000}
       - MODEL_DIR_IN_DOCKER=/models
       - RUNNING_IN_DOCKER=true
+      - OPENBLAS_NUM_THREADS=1
+      - OMP_NUM_THREADS=1
+      - MKL_NUM_THREADS=1
+      - NUMEXPR_NUM_THREADS=1
+      - VECLIB_MAXIMUM_THREADS=1
+      - OTEL_SDK_DISABLED=true
+      - OTEL_RESOURCE_DETECTORS=none
+      - OTEL_TRACES_EXPORTER=none
+      - OTEL_METRICS_EXPORTER=none
       - FLAGS_use_mkldnn=0
       - FLAGS_use_onednn=0
       - PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT=0
       - NO_PROXY=localhost,127.0.0.1,milvus,graph,milvus-minio,milvus-etcd,etcd,minio,mineru,paddlex,api.siliconflow.cn
       - no_proxy=localhost,127.0.0.1,milvus,graph,milvus-minio,milvus-etcd,etcd,minio,mineru,paddlex,api.siliconflow.cn
+    pids_limit: 8192
     command: uv run --no-dev uvicorn server.main:app --host 0.0.0.0 --port 5050
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:5050/api/system/health || exit 1"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5050/api/system/health', timeout=5)",
+        ]
       interval: 30s
       timeout: 15s
       retries: 8
@@ -59,7 +79,7 @@ services:
     image: yuxi-web:0.5.prod
     container_name: web-prod
     ports:
-      - "80:80"
+      - "${YUXI_WEB_PORT:-32500}:80"
     depends_on:
       - api
     networks:
@@ -73,6 +93,8 @@ services:
   graph:
     image: neo4j:5.26
     container_name: graph
+    security_opt:
+      - seccomp:unconfined
     volumes:
       - ./docker/volumes/neo4j/data:/data
       - ./docker/volumes/neo4j/logs:/var/lib/neo4j/logs
@@ -161,6 +183,8 @@ services:
   postgres:
     image: postgres:16
     container_name: postgres
+    security_opt:
+      - seccomp:unconfined
     ports:
       - "5432:5432"
     environment:
