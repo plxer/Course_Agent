@@ -11,7 +11,6 @@
             <router-link to="/reading" class="exercises-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
             <router-link to="/videos" class="exercises-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
             <router-link to="/exercises" class="exercises-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
-            <router-link to="/mall" class="exercises-nav-link" :class="{ active: $route.path === '/mall' }">积分商城</router-link>
             <router-link v-if="userStore.isAdmin" to="/ops" class="exercises-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
             <router-link to="/guide" class="exercises-nav-link" :class="{ active: $route.path === '/guide' }">使用指南</router-link>
           </div>
@@ -21,10 +20,10 @@
               <router-link to="/register" class="exercises-auth-link primary">注册</router-link>
             </template>
             <template v-else>
-              <router-link to="/mall" class="exercises-points-link" title="积分商城">
+              <div class="exercises-points-link" style="cursor: default; pointer-events: none;">
                 <span class="exercises-points-num">{{ pointsDisplay }}</span>
                 <span class="exercises-points-label">积分</span>
-              </router-link>
+              </div>
               <button type="button" class="exercises-auth-btn" @click="openWrongModal">错题分析</button>
               <span class="exercises-username">{{ userStore.username || userStore.userIdLogin }}</span>
               <button type="button" class="exercises-auth-btn" @click="handleSwitchAccount">切换账号</button>

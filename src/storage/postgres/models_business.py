@@ -622,3 +622,40 @@ class UserMallItem(Base):
             "mall_item_id": self.mall_item_id,
             "acquired_at": format_utc_datetime(self.acquired_at),
         }
+
+
+class UserFeedback(Base):
+    """用户反馈表"""
+
+    __tablename__ = "user_feedbacks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # 用户ID，未登录用户可为空
+    username = Column(String, nullable=True)  # 用户名（方便显示）
+    category = Column(String(50), nullable=False, default="general")  # 反馈类别: general/bug/feature/improvement
+    title = Column(String(255), nullable=False)  # 反馈标题
+    content = Column(Text, nullable=False)  # 反馈内容
+    contact = Column(String(255), nullable=True)  # 联系方式（可选）
+    status = Column(String(20), nullable=False, default="pending")  # 状态: pending/processing/resolved/closed
+    admin_reply = Column(Text, nullable=True)  # 管理员回复
+    replied_by = Column(String(100), nullable=True)  # 回复的管理员用户名
+    replied_at = Column(DateTime, nullable=True)  # 回复时间
+    created_at = Column(DateTime, default=utc_now_naive)
+    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "username": self.username,
+            "category": self.category,
+            "title": self.title,
+            "content": self.content,
+            "contact": self.contact,
+            "status": self.status,
+            "admin_reply": self.admin_reply,
+            "replied_by": self.replied_by,
+            "replied_at": format_utc_datetime(self.replied_at),
+            "created_at": format_utc_datetime(self.created_at),
+            "updated_at": format_utc_datetime(self.updated_at),
+        }

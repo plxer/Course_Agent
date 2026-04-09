@@ -19,7 +19,7 @@
               视频
             </router-link>
             <router-link to="/exercises" class="videos-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
-            <router-link to="/mall" class="videos-nav-link" :class="{ active: $route.path === '/mall' }">积分商城</router-link>
+
             <router-link v-if="userStore.isAdmin" to="/ops" class="videos-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
             <router-link to="/guide" class="videos-nav-link" :class="{ active: $route.path === '/guide' }">使用指南</router-link>
           </div>

@@ -127,17 +127,25 @@ const router = createRouter({
       component: () => import('../views/course/VideosView.vue'),
       meta: { requiresAuth: true }
     },
+/*
     {
       path: '/mall',
       name: 'courseMall',
       component: () => import('../views/course/MallView.vue'),
       meta: { requiresAuth: true }
     },
+*/
     {
       path: '/guide',
       name: 'courseGuide',
       component: () => import('../views/course/GuideView.vue'),
       meta: { requiresAuth: false }
+    },
+    {
+      path: '/feedback-admin',
+      name: 'feedbackAdmin',
+      component: () => import('../views/course/FeedbackAdminView.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true }
     },
     {
       path: '/:pathMatch(.*)*',

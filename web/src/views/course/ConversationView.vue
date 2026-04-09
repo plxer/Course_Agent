@@ -11,7 +11,7 @@
             <router-link to="/reading" class="conversation-view-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
             <router-link to="/videos" class="conversation-view-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
             <router-link to="/exercises" class="conversation-view-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
-            <router-link to="/mall" class="conversation-view-nav-link" :class="{ active: $route.path === '/mall' }">积分商城</router-link>
+
             <router-link v-if="userStore.isAdmin" to="/ops" class="conversation-view-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
             <router-link to="/guide" class="conversation-view-nav-link" :class="{ active: $route.path === '/guide' }">使用指南</router-link>
           </div>
@@ -35,14 +35,20 @@
       <!-- 对话界面 -->
       <div class="conversation-view-chat">
         <!-- 左侧对话列表 -->
-        <div class="conversation-view-sidebar">
+        <div class="conversation-view-sidebar" :class="{ collapsed: sidebarCollapsed }">
           <div class="conversation-sidebar-header">
-            <h3 class="conversation-sidebar-title">对话列表</h3>
-            <button type="button" class="conversation-sidebar-new-btn" @click="createNewChat" title="新建对话">
-              <i class="fa fa-plus"></i> 新建对话
+            <h3 class="conversation-sidebar-title" v-show="!sidebarCollapsed">对话列表</h3>
+            <button type="button" class="conversation-sidebar-new-btn" :class="{ collapsed: sidebarCollapsed }" @click="createNewChat" :title="sidebarCollapsed ? '新建对话' : '新建对话'">
+              <i class="fa fa-plus"></i>
+              <span v-show="!sidebarCollapsed">新建对话</span>
+            </button>
+            <button type="button" class="conversation-sidebar-toggle-btn" @click="toggleSidebar" :title="sidebarCollapsed ? '展开' : '收起'">
+              <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :style="{ transform: sidebarCollapsed ? 'rotate(180deg)' : 'none' }">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
             </button>
           </div>
-          <div class="conversation-sidebar-content">
+          <div class="conversation-sidebar-content" v-show="!sidebarCollapsed">
             <div class="conversation-list">
               <div 
                 v-for="(chat, index) in chatList" 
@@ -242,6 +248,14 @@ const store = useCourseConversationStore();
 const inputMessage = ref('');
 /** 待发送的课程对话配图 */
 const pendingConversationImage = ref(null);
+
+// 左侧对话列表折叠状态
+const sidebarCollapsed = ref(false);
+
+// 切换侧边栏折叠状态
+const toggleSidebar = () => {
+  sidebarCollapsed.value = !sidebarCollapsed.value;
+};
 
 const pendingConversationImageThumbSrc = computed(() => {
   const p = pendingConversationImage.value;
@@ -1059,6 +1073,12 @@ const scrollToBottom = () => {
   flex-direction: column;
   flex-shrink: 0;
   overflow: hidden;
+  transition: width 0.3s ease, min-width 0.3s ease;
+}
+
+.conversation-view-sidebar.collapsed {
+  width: 56px;
+  min-width: 56px;
 }
 
 .conversation-sidebar-header {
@@ -1067,6 +1087,13 @@ const scrollToBottom = () => {
   justify-content: space-between;
   padding: 16px;
   border-bottom: 1px solid var(--gray-200);
+  gap: 8px;
+}
+
+.conversation-view-sidebar.collapsed .conversation-sidebar-header {
+  flex-direction: column;
+  padding: 12px 8px;
+  gap: 12px;
 }
 
 .conversation-sidebar-title {
@@ -1094,6 +1121,45 @@ const scrollToBottom = () => {
 .conversation-sidebar-new-btn:hover {
   color: var(--white);
   background-color: var(--primary-color);
+}
+
+.conversation-sidebar-new-btn.collapsed {
+  padding: 8px;
+  justify-content: center;
+}
+
+.conversation-sidebar-new-btn.collapsed i {
+  margin: 0;
+}
+
+.conversation-sidebar-toggle-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--gray-500);
+  transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.conversation-sidebar-toggle-btn:hover {
+  color: var(--primary-color);
+  background-color: var(--gray-200);
+}
+
+.conversation-sidebar-toggle-btn .toggle-icon {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.3s ease;
+}
+
+.conversation-view-sidebar.collapsed .conversation-sidebar-toggle-btn {
+  width: 32px;
+  height: 32px;
 }
 
 .conversation-sidebar-content {
@@ -1776,6 +1842,17 @@ const scrollToBottom = () => {
   .conversation-view-stop-btn {
     font-size: 14px;
     padding: 12px 16px;
+  }
+
+  /* 移动端侧边栏默认收起 */
+  .conversation-view-sidebar {
+    width: 56px;
+    min-width: 56px;
+  }
+
+  .conversation-view-sidebar:not(.collapsed) {
+    width: 240px;
+    min-width: 240px;
   }
 }
 </style>
