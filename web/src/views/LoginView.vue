@@ -201,14 +201,24 @@ import { useUserStore } from '@/stores/user'
 import { useInfoStore } from '@/stores/info'
 import { message } from 'ant-design-vue'
 import { healthApi } from '@/apis/system_api'
+import loginBgBundled from '@/assets/login-bg.jpg'
 import { UserOutlined, LockOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue'
+
 const router = useRouter()
 const userStore = useUserStore()
 const infoStore = useInfoStore()
 
+/** info.template 里默认的 public 路径；与之一致时改用打包后的资源 URL，避免部署后裂图 */
+const DEFAULT_LOGIN_BG_PUBLIC_PATHS = new Set(['/login-bg.jpg', 'login-bg.jpg'])
+
 // 品牌展示数据
 const loginBgImage = computed(() => {
-  return infoStore.organization?.login_bg || '/login-bg.jpg'
+  const raw = infoStore.organization?.login_bg
+  const s = raw != null ? String(raw).trim() : ''
+  if (!s || DEFAULT_LOGIN_BG_PUBLIC_PATHS.has(s)) {
+    return loginBgBundled
+  }
+  return s
 })
 const brandOrgName = computed(() => {
   return infoStore.organization?.name?.trim() || ''
