@@ -149,6 +149,36 @@ async def reload_info_config(current_user: User = Depends(get_admin_user)):
 # =============================================================================
 
 
+async def _build_ocr_health_response() -> dict:
+    """OCR 各处理通道健康状态（供 /ocr/health 与 /health/ocr 复用）。"""
+    from src.plugins.document_processor_factory import DocumentProcessorFactory
+
+    try:
+        health_status = DocumentProcessorFactory.check_all_health()
+        formatted_status = {}
+        for service_name, health_info in health_status.items():
+            formatted_status[service_name] = {
+                "status": health_info.get("status", "unknown"),
+                "message": health_info.get("message", ""),
+                "details": health_info.get("details", {}),
+            }
+        overall_status = (
+            "healthy" if any(svc["status"] == "healthy" for svc in formatted_status.values()) else "unhealthy"
+        )
+        return {
+            "overall_status": overall_status,
+            "services": formatted_status,
+            "message": "OCR服务健康检查完成",
+        }
+    except Exception as e:
+        logger.error(f"OCR健康检查失败: {str(e)}")
+        return {
+            "overall_status": "error",
+            "services": {},
+            "message": f"OCR健康检查失败: {str(e)}",
+        }
+
+
 @system.get("/ocr/stats")
 async def get_ocr_stats(current_user: User = Depends(get_admin_user)):
     """
@@ -172,39 +202,13 @@ async def check_ocr_services_health(current_user: User = Depends(get_admin_user)
     检查所有OCR服务的健康状态
     返回各个OCR服务的可用性信息
     """
-    from src.plugins.document_processor_factory import DocumentProcessorFactory
+    return await _build_ocr_health_response()
 
-    try:
-        # 使用统一的健康检查接口
-        health_status = DocumentProcessorFactory.check_all_health()
 
-        # 转换为旧格式以保持API兼容性
-        formatted_status = {}
-        for service_name, health_info in health_status.items():
-            formatted_status[service_name] = {
-                "status": health_info.get("status", "unknown"),
-                "message": health_info.get("message", ""),
-                "details": health_info.get("details", {}),
-            }
-
-        # 计算整体健康状态
-        overall_status = (
-            "healthy" if any(svc["status"] == "healthy" for svc in formatted_status.values()) else "unhealthy"
-        )
-
-        return {
-            "overall_status": overall_status,
-            "services": formatted_status,
-            "message": "OCR服务健康检查完成",
-        }
-
-    except Exception as e:
-        logger.error(f"OCR健康检查失败: {str(e)}")
-        return {
-            "overall_status": "error",
-            "services": {},
-            "message": f"OCR健康检查失败: {str(e)}",
-        }
+@system.get("/health/ocr")
+async def check_ocr_services_health_frontend_alias(current_user: User = Depends(get_admin_user)):
+    """与 /ocr/health 相同；前端 system_api healthApi.checkOcrHealth 使用此路径。"""
+    return await _build_ocr_health_response()
 
 
 # =============================================================================

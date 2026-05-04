@@ -1,38 +1,194 @@
 <template>
-  <div class="ops-container">
-    <header class="ops-header">
-      <div class="ops-header-content">
-        <router-link to="/" class="ops-logo">
-          <span class="ops-logo-text">天津大学《计算机网络》课程数智化平台</span>
-        </router-link>
-        <div class="ops-right">
-          <div class="ops-nav">
-            <router-link to="/conversation" class="ops-nav-link" :class="{ active: $route.path === '/conversation' || $route.path === '/course' }">对话</router-link>
-            <router-link to="/reading" class="ops-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
-            <router-link to="/videos" class="ops-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
-            <router-link to="/exercises" class="ops-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
+  <div class="ops-container course-page">
+    <CourseTopbar @logout="handleLogout" @switch-account="handleSwitchAccount" />
 
-            <router-link v-if="userStore.isAdmin" to="/ops" class="ops-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
-            <router-link to="/guide" class="ops-nav-link" :class="{ active: $route.path === '/guide' }">使用指南</router-link>
+    <main class="ops-main page-shell">
+      <CoursePageHero
+        eyebrow="Operations"
+        title="运维总览"
+        subtitle="统一查看课程平台的用户、对话、做题与反馈数据。"
+      />
+      <div class="ops-dashboard">
+        <div class="ops-overview">
+          <div class="ops-stat-card">
+            <span class="ops-stat-value">{{ basicStats?.total_users ?? '—' }}</span>
+            <span class="ops-stat-label">用户数</span>
           </div>
-          <div class="ops-auth">
-            <template v-if="!userStore.isLoggedIn">
-              <router-link to="/login" class="ops-auth-link">登录</router-link>
-              <router-link to="/register" class="ops-auth-link primary">注册</router-link>
-            </template>
-            <template v-else>
-              <span class="ops-username">{{ userStore.username || userStore.userIdLogin }}</span>
-              <button type="button" class="ops-auth-btn" @click="handleSwitchAccount">切换账号</button>
-              <button type="button" class="ops-auth-btn" @click="handleLogout">退出</button>
-            </template>
+          <div class="ops-stat-card">
+            <span class="ops-stat-value">{{ basicStats?.total_conversations ?? '—' }}</span>
+            <span class="ops-stat-label">总对话数</span>
+          </div>
+          <div class="ops-stat-card">
+            <span class="ops-stat-value">{{ basicStats?.total_messages ?? '—' }}</span>
+            <span class="ops-stat-label">总消息数</span>
+          </div>
+          <div class="ops-stat-card">
+            <span class="ops-stat-value">{{ basicStats?.active_users_24h ?? '—' }}</span>
+            <span class="ops-stat-label">24h 活跃用户</span>
+          </div>
+          <div class="ops-stat-card">
+            <span class="ops-stat-value">{{ basicStats?.total_exercise_attempts ?? '—' }}</span>
+            <span class="ops-stat-label">做题次数</span>
           </div>
         </div>
-      </div>
-    </header>
 
-    <main class="ops-main">
-      <div class="ops-dashboard">
-        <DashboardView :embed-mode="true" />
+        <div class="ops-grid">
+          <div class="ops-chart">
+            <CallStatsComponent :loading="loadingStats" />
+          </div>
+          <div class="ops-table-section">
+            <a-card
+              class="conversations-section"
+              title="用户对话记录"
+              :loading="loadingConversations"
+            >
+              <template #extra>
+                <a-space>
+                  <a-input
+                    v-model:value="filters.user_id"
+                    placeholder="用户"
+                    size="small"
+                    style="width: 100px"
+                    @change="handleFilterChange"
+                  />
+                  <a-select
+                    v-model:value="filters.status"
+                    placeholder="状态"
+                    size="small"
+                    style="width: 90px"
+                    @change="handleFilterChange"
+                  >
+                    <a-select-option value="active">活跃</a-select-option>
+                    <a-select-option value="deleted">已删除</a-select-option>
+                    <a-select-option value="all">全部</a-select-option>
+                  </a-select>
+                  <a-button size="small" @click="loadConversations" :loading="loadingConversations"
+                    >刷新</a-button
+                  >
+                </a-space>
+              </template>
+              <a-table
+                :columns="conversationColumns"
+                :data-source="conversations"
+                :loading="loadingConversations"
+                :pagination="conversationPagination"
+                @change="handleTableChange"
+                row-key="thread_id"
+                size="small"
+              >
+                <template #bodyCell="{ column, record }">
+                  <template v-if="column.key === 'title'">
+                    <a @click="handleViewConversationDetail(record)" class="feedback-title">{{
+                      record.title || '未命名对话'
+                    }}</a>
+                  </template>
+                  <template v-if="column.key === 'user_display'">
+                    <span class="user-display">{{
+                      record.user_login || record.user_id || '—'
+                    }}</span>
+                  </template>
+                  <template v-if="column.key === 'status'">
+                    <a-tag :color="record.status === 'active' ? 'green' : 'red'" size="small">{{
+                      record.status === 'active' ? '活跃' : '已删除'
+                    }}</a-tag>
+                  </template>
+                  <template v-if="column.key === 'updated_at'">
+                    <span class="time-text">{{ formatDate(record.updated_at) }}</span>
+                  </template>
+                  <template v-if="column.key === 'actions'">
+                    <a-button
+                      type="link"
+                      size="small"
+                      @click="handleViewConversationDetail(record)"
+                      :loading="loadingConversationDetail"
+                      >详情</a-button
+                    >
+                  </template>
+                </template>
+              </a-table>
+            </a-card>
+          </div>
+          <div class="ops-table-section">
+            <a-card class="conversations-section" title="做题记录" :loading="loadingExercises">
+              <template #extra>
+                <a-space>
+                  <a-input
+                    v-model:value="exerciseUserFilter"
+                    placeholder="用户"
+                    size="small"
+                    style="width: 100px"
+                    allow-clear
+                  />
+                  <a-button size="small" @click="loadExerciseAttempts" :loading="loadingExercises"
+                    >刷新</a-button
+                  >
+                </a-space>
+              </template>
+              <a-table
+                :columns="exerciseColumns"
+                :data-source="exerciseAttempts"
+                :loading="loadingExercises"
+                :pagination="false"
+                row-key="id"
+                size="small"
+                :expand-row-by-click="true"
+              >
+                <template #expandedRowRender="{ record }">
+                  <div class="exercise-detail">
+                    <div v-if="record.question_content" class="exercise-detail-row">
+                      <strong>题目：</strong>
+                      <div
+                        class="exercise-detail-markdown"
+                        v-html="renderMarkdown(record.question_content)"
+                      ></div>
+                    </div>
+                    <div class="exercise-detail-row">
+                      <strong>我的答案：</strong>
+                      <div
+                        v-if="record.user_answer"
+                        class="exercise-detail-markdown"
+                        v-html="renderMarkdown(record.user_answer)"
+                      ></div>
+                      <span v-else>—</span>
+                    </div>
+                    <div class="exercise-detail-row">
+                      <strong>正确答案：</strong>
+                      <div
+                        v-if="record.correct_answer"
+                        class="exercise-detail-markdown"
+                        v-html="renderMarkdown(record.correct_answer)"
+                      ></div>
+                      <span v-else>—</span>
+                    </div>
+                    <div v-if="record.explanation" class="exercise-detail-row">
+                      <strong>解析：</strong>
+                      <div
+                        class="exercise-detail-markdown"
+                        v-html="renderMarkdown(record.explanation)"
+                      ></div>
+                    </div>
+                    <p v-if="record.section_title" class="exercise-detail-row exercise-detail-meta">
+                      <strong>章节：</strong>{{ record.section_title }}
+                    </p>
+                  </div>
+                </template>
+                <template #bodyCell="{ column, record }">
+                  <template v-if="column.key === 'user_login'">
+                    <span class="user-display">{{ record.user_login }}</span>
+                  </template>
+                  <template v-if="column.key === 'is_correct'">
+                    <a-tag :color="record.is_correct ? 'green' : 'red'" size="small">{{
+                      record.is_correct ? '对' : '错'
+                    }}</a-tag>
+                  </template>
+                  <template v-if="column.key === 'created_at'">
+                    <span class="time-text">{{ formatFullDate(record.created_at) }}</span>
+                  </template>
+                </template>
+              </a-table>
+            </a-card>
+          </div>
+        </div>
       </div>
 
       <!-- 用户反馈区域 -->
@@ -40,21 +196,35 @@
         <a-card class="feedback-card" title="用户反馈" :loading="loadingFeedbacks">
           <template #extra>
             <a-space>
-              <a-select v-model:value="feedbackStatusFilter" placeholder="状态" size="small" style="width: 100px" @change="loadFeedbacks">
+              <a-select
+                v-model:value="feedbackStatusFilter"
+                placeholder="状态"
+                size="small"
+                style="width: 100px"
+                @change="loadFeedbacks"
+              >
                 <a-select-option value="">全部</a-select-option>
                 <a-select-option value="pending">待处理</a-select-option>
                 <a-select-option value="processing">处理中</a-select-option>
                 <a-select-option value="resolved">已解决</a-select-option>
                 <a-select-option value="closed">已关闭</a-select-option>
               </a-select>
-              <a-select v-model:value="feedbackCategoryFilter" placeholder="类别" size="small" style="width: 100px" @change="loadFeedbacks">
+              <a-select
+                v-model:value="feedbackCategoryFilter"
+                placeholder="类别"
+                size="small"
+                style="width: 100px"
+                @change="loadFeedbacks"
+              >
                 <a-select-option value="">全部</a-select-option>
                 <a-select-option value="general">一般</a-select-option>
                 <a-select-option value="bug">Bug</a-select-option>
                 <a-select-option value="feature">功能建议</a-select-option>
                 <a-select-option value="improvement">改进建议</a-select-option>
               </a-select>
-              <a-button size="small" @click="loadFeedbacks" :loading="loadingFeedbacks">刷新</a-button>
+              <a-button size="small" @click="loadFeedbacks" :loading="loadingFeedbacks"
+                >刷新</a-button
+              >
             </a-space>
           </template>
 
@@ -79,7 +249,9 @@
                 </a-tag>
               </template>
               <template v-if="column.key === 'title'">
-                <a @click="handleViewFeedbackDetail(record)" class="feedback-title">{{ record.title }}</a>
+                <a @click="handleViewFeedbackDetail(record)" class="feedback-title">{{
+                  record.title
+                }}</a>
               </template>
               <template v-if="column.key === 'username'">
                 <span class="user-display">{{ record.username || '匿名用户' }}</span>
@@ -88,7 +260,9 @@
                 <span class="time-text">{{ formatDate(record.created_at) }}</span>
               </template>
               <template v-if="column.key === 'actions'">
-                <a-button type="link" size="small" @click="handleViewFeedbackDetail(record)">详情</a-button>
+                <a-button type="link" size="small" @click="handleViewFeedbackDetail(record)"
+                  >详情</a-button
+                >
               </template>
             </template>
           </a-table>
@@ -143,7 +317,8 @@
             <div class="reply-box">
               <p>{{ selectedFeedback.admin_reply }}</p>
               <p class="reply-meta" v-if="selectedFeedback.replied_by">
-                回复人: {{ selectedFeedback.replied_by }} | {{ formatFullDate(selectedFeedback.replied_at) }}
+                回复人: {{ selectedFeedback.replied_by }} |
+                {{ formatFullDate(selectedFeedback.replied_at) }}
               </p>
             </div>
           </div>
@@ -155,27 +330,94 @@
               style="margin-bottom: 12px"
             />
             <a-space>
-              <a-button type="primary" size="small" @click="handleReply" :loading="replying">回复</a-button>
-              <a-button size="small" @click="handleCloseFeedback" :loading="closing">关闭反馈</a-button>
+              <a-button type="primary" size="small" @click="handleReply" :loading="replying"
+                >回复</a-button
+              >
+              <a-button size="small" @click="handleCloseFeedback" :loading="closing"
+                >关闭反馈</a-button
+              >
             </a-space>
           </div>
         </div>
       </template>
     </a-modal>
+
+    <!-- 对话详情弹窗 -->
+    <a-modal
+      v-model:open="conversationDetailModalOpen"
+      title="对话详情"
+      width="720px"
+      :footer="null"
+      destroy-on-close
+      class="conversation-detail-modal"
+      @cancel="conversationDetail = null"
+    >
+      <template v-if="conversationDetail">
+        <div class="feedback-detail">
+          <div class="feedback-detail-item">
+            <span class="detail-label">用户</span>
+            <span class="detail-value">{{
+              conversationDetail.user_login || conversationDetail.user_id || '—'
+            }}</span>
+          </div>
+          <div class="feedback-detail-item">
+            <span class="detail-label">标题</span>
+            <span class="detail-value">{{ conversationDetail.title || '未命名对话' }}</span>
+          </div>
+          <div class="feedback-detail-item">
+            <span class="detail-label">消息数</span>
+            <span class="detail-value">{{ conversationDetail.message_count ?? 0 }}</span>
+          </div>
+          <div class="feedback-detail-item">
+            <span class="detail-label">状态</span>
+            <a-tag :color="conversationDetail.status === 'active' ? 'green' : 'red'" size="small">
+              {{ conversationDetail.status === 'active' ? '活跃' : '已删除' }}
+            </a-tag>
+          </div>
+          <div class="feedback-detail-content">
+            <div class="detail-label">消息记录</div>
+            <div
+              v-if="conversationDetail.messages && conversationDetail.messages.length"
+              class="detail-messages-list"
+            >
+              <div
+                v-for="(msg, idx) in conversationDetail.messages"
+                :key="msg.id || idx"
+                class="detail-message-item"
+                :class="msg.role"
+              >
+                <span class="detail-message-role">{{ msg.role === 'user' ? '用户' : 'AI' }}</span>
+                <span class="detail-message-time">{{ formatFullDate(msg.created_at) }}</span>
+                <div v-if="!msg.content" class="content-box">—</div>
+                <div
+                  v-else
+                  class="content-box exercise-detail-markdown"
+                  v-html="renderMarkdown(msg.content)"
+                ></div>
+              </div>
+            </div>
+            <div v-else class="content-box">暂无消息</div>
+          </div>
+        </div>
+      </template>
+      <div v-else class="content-box">加载中…</div>
+    </a-modal>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { message } from 'ant-design-vue'
+import { marked } from 'marked'
+import CourseTopbar from '@/components/course/CourseTopbar.vue'
+import CoursePageHero from '@/components/course/CoursePageHero.vue'
 import { useUserStore } from '@/stores/user'
 import { initColorPalette } from '@/utils/chartColors'
-import DashboardView from '@/views/DashboardView.vue'
+import CallStatsComponent from '@/components/dashboard/CallStatsComponent.vue'
+import { dashboardApi } from '@/apis/dashboard_api'
 import { getAllFeedbacks, updateFeedback } from '@/apis/feedback_api'
 import dayjs from '@/utils/time'
 
-const router = useRouter()
 const userStore = useUserStore()
 
 const handleLogout = () => {
@@ -185,7 +427,80 @@ const handleSwitchAccount = () => {
   userStore.logout()
 }
 
-// 反馈相关数据
+const basicStats = ref({})
+const loadingStats = ref(false)
+const conversations = ref([])
+const loadingConversations = ref(false)
+const loadingConversationDetail = ref(false)
+const conversationDetailModalOpen = ref(false)
+const conversationDetail = ref(null)
+const exerciseAttempts = ref([])
+const loadingExercises = ref(false)
+const exerciseUserFilter = ref('')
+
+const filters = reactive({
+  user_id: '',
+  status: 'active'
+})
+
+const conversationPagination = reactive({
+  current: 1,
+  pageSize: 8,
+  total: 0,
+  showSizeChanger: false,
+  showQuickJumper: false,
+  showTotal: (total, range) => `${range[0]}-${range[1]} / ${total}`
+})
+
+const conversationColumns = [
+  {
+    title: '对话标题',
+    dataIndex: 'title',
+    key: 'title',
+    ellipsis: true
+  },
+  {
+    title: '用户',
+    key: 'user_display',
+    width: '100px',
+    ellipsis: true
+  },
+  {
+    title: '消息数',
+    dataIndex: 'message_count',
+    key: 'message_count',
+    width: '60px',
+    align: 'center'
+  },
+  {
+    title: '状态',
+    dataIndex: 'status',
+    key: 'status',
+    width: '70px',
+    align: 'center'
+  },
+  {
+    title: '更新时间',
+    dataIndex: 'updated_at',
+    key: 'updated_at',
+    width: '120px'
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: '60px',
+    align: 'center'
+  }
+]
+
+const exerciseColumns = [
+  { title: '用户', dataIndex: 'user_login', key: 'user_login', width: 90, ellipsis: true },
+  { title: '题型', dataIndex: 'question_type', key: 'question_type', width: 80 },
+  { title: '知识点', dataIndex: 'knowledge_point', key: 'knowledge_point', ellipsis: true },
+  { title: '对/错', dataIndex: 'is_correct', key: 'is_correct', width: 64, align: 'center' },
+  { title: '时间', dataIndex: 'created_at', key: 'created_at', width: 150 }
+]
+
 const feedbacks = ref([])
 const loadingFeedbacks = ref(false)
 const feedbackStatusFilter = ref('')
@@ -280,6 +595,90 @@ const formatFullDate = (dateString) => {
   const d = dayjs(dateString)
   return d.isValid() ? d.format('YYYY-MM-DD HH:mm:ss') : '—'
 }
+
+function renderMarkdown(text) {
+  if (!text || typeof text !== 'string') return ''
+  return marked.parse(text, { gfm: true, breaks: true })
+}
+
+const loadStats = async () => {
+  loadingStats.value = true
+  try {
+    basicStats.value = await dashboardApi.getStats()
+  } catch (error) {
+    console.error('加载统计数据失败:', error)
+    message.error('加载统计数据失败')
+  } finally {
+    loadingStats.value = false
+  }
+}
+
+const loadConversations = async () => {
+  loadingConversations.value = true
+  try {
+    const params = {
+      user_id: filters.user_id || undefined,
+      status: filters.status,
+      limit: conversationPagination.pageSize,
+      offset: (conversationPagination.current - 1) * conversationPagination.pageSize
+    }
+
+    const response = await dashboardApi.getConversations(params)
+    conversations.value = response
+    conversationPagination.total = response.length
+  } catch (error) {
+    console.error('加载对话列表失败:', error)
+    message.error('加载对话列表失败')
+  } finally {
+    loadingConversations.value = false
+  }
+}
+
+const handleFilterChange = () => {
+  conversationPagination.current = 1
+  loadConversations()
+}
+
+const handleTableChange = (pag) => {
+  conversationPagination.current = pag.current
+  conversationPagination.pageSize = pag.pageSize
+  loadConversations()
+}
+
+const handleViewConversationDetail = async (record) => {
+  try {
+    loadingConversationDetail.value = true
+    conversationDetail.value = null
+    conversationDetailModalOpen.value = true
+    conversationDetail.value = await dashboardApi.getConversationDetail(record.thread_id)
+  } catch (error) {
+    console.error('获取对话详情失败:', error)
+    message.error('获取对话详情失败')
+    conversationDetailModalOpen.value = false
+  } finally {
+    loadingConversationDetail.value = false
+  }
+}
+
+const loadExerciseAttempts = async () => {
+  loadingExercises.value = true
+  try {
+    const params = { limit: 50, offset: 0 }
+    if (exerciseUserFilter.value?.trim()) params.user_login = exerciseUserFilter.value.trim()
+    exerciseAttempts.value = await dashboardApi.getExerciseAttempts(params)
+  } catch (error) {
+    console.error('加载做题记录失败:', error)
+    message.error('加载做题记录失败')
+  } finally {
+    loadingExercises.value = false
+  }
+}
+
+let exerciseFilterTimer = null
+watch(exerciseUserFilter, () => {
+  if (exerciseFilterTimer) clearTimeout(exerciseFilterTimer)
+  exerciseFilterTimer = setTimeout(() => loadExerciseAttempts(), 300)
+})
 
 const loadFeedbacks = async () => {
   loadingFeedbacks.value = true
@@ -379,7 +778,9 @@ onMounted(() => {
   root.style.setProperty('--main-500', '#1A365D')
   initColorPalette()
 
-  // 加载反馈列表
+  loadStats()
+  loadConversations()
+  loadExerciseAttempts()
   loadFeedbacks()
 })
 </script>
@@ -415,7 +816,7 @@ onMounted(() => {
 
 .ops-logo-text {
   margin-left: 0;
-  color: var(--primary-color);
+  color: var(--accent-primary);
   font-weight: 600;
   font-size: 16px;
   white-space: nowrap;
@@ -443,7 +844,7 @@ onMounted(() => {
 .ops-nav-link:hover,
 .ops-nav-link.active,
 .ops-nav-link.router-link-active {
-  color: var(--primary-color);
+  color: var(--accent-primary);
   font-weight: 500;
 }
 
@@ -459,20 +860,22 @@ onMounted(() => {
   font-size: 14px;
   padding: 6px 12px;
   border-radius: 6px;
-  transition: color 0.2s, background 0.2s;
+  transition:
+    color 0.2s,
+    background 0.2s;
 }
 
 .ops-auth-link:hover {
-  color: var(--primary-color);
+  color: var(--accent-primary);
 }
 
 .ops-auth-link.primary {
   color: var(--gray-0);
-  background: var(--primary-color);
+  background: var(--accent-primary);
 }
 
 .ops-auth-link.primary:hover {
-  background: var(--primary-color-dark);
+  background: var(--accent-primary-hover);
   color: var(--gray-0);
 }
 
@@ -490,12 +893,14 @@ onMounted(() => {
   background: var(--gray-0);
   color: var(--gray-600);
   cursor: pointer;
-  transition: color 0.2s, border-color 0.2s;
+  transition:
+    color 0.2s,
+    border-color 0.2s;
 }
 
 .ops-auth-btn:hover {
-  color: var(--primary-color);
-  border-color: var(--primary-color);
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
 }
 
 .ops-main {
@@ -504,14 +909,115 @@ onMounted(() => {
   min-height: calc(100vh - 52px);
 }
 
-/* 运维页深蓝主色，与课程顶栏一致 */
+/* 运维页容器 */
 .ops-container {
-  --primary-color: #1A365D;
-  --primary-color-dark: #153e68;
 }
 
-.ops-feedback-section {
+.ops-overview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 16px 0;
+  margin-bottom: 16px;
+}
+
+.ops-stat-card {
+  background: var(--gray-0);
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  padding: 12px 20px;
+  min-width: 100px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.ops-stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--gray-1000);
+  line-height: 1.2;
+}
+
+.ops-stat-label {
+  font-size: 12px;
+  color: var(--gray-600);
+  margin-top: 4px;
+}
+
+.ops-grid {
+  display: grid;
   padding: 0 16px 24px;
+  gap: 16px;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto auto;
+}
+
+.ops-chart {
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+}
+
+.ops-chart :deep(.grid-item.call-stats) {
+  flex: 1;
+  min-height: 0;
+}
+
+.ops-chart :deep(.call-stats-container .chart-container),
+.ops-chart :deep(.chart-container .chart) {
+  min-height: 280px;
+}
+
+.ops-table-section {
+  min-height: 280px;
+}
+
+.exercise-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.exercise-detail-row {
+  font-size: 13px;
+  color: var(--gray-800);
+}
+
+.exercise-detail-meta {
+  margin: 0;
+}
+
+.exercise-detail-markdown :deep(p) {
+  margin: 0 0 8px;
+}
+
+.exercise-detail-markdown :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.detail-messages-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.detail-message-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-message-role {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gray-700);
+}
+
+.detail-message-time {
+  font-size: 12px;
+  color: var(--gray-500);
 }
 
 .feedback-card {
@@ -575,7 +1081,6 @@ onMounted(() => {
   font-size: 12px;
 }
 
-
 .feedback-detail {
   padding: 8px 0;
 }
@@ -632,34 +1137,5 @@ onMounted(() => {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--gray-200);
-}
-
-/* 运维内嵌仪表盘：统计卡片与图表统一深蓝风格 */
-.ops-dashboard {
-  --main-color: #1A365D;
-  --main-500: #1A365D;
-  --main-600: #2C5282;
-  --main-700: #2B6CB0;
-  --color-primary-50: #EBF8FF;
-  --color-primary-100: #BEE3F8;
-  --color-primary-500: #1A365D;
-  --color-primary-700: #2C5282;
-}
-
-.ops-dashboard :deep(.dashboard-card),
-.ops-dashboard :deep(.conversations-section),
-.ops-dashboard :deep(.call-stats-section) {
-  border-color: var(--gray-200);
-}
-
-.ops-dashboard :deep(.dashboard-card .ant-card-head-title),
-.ops-dashboard :deep(.stat-value) {
-  color: var(--primary-color);
-}
-
-.ops-dashboard :deep(.stat-card.primary .stat-icon),
-.ops-dashboard :deep(.stat-card.secondary .stat-icon) {
-  background-color: var(--color-primary-50);
-  color: var(--primary-color);
 }
 </style>

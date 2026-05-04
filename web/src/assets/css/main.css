@@ -9,39 +9,130 @@
   --min-width: 450px;
 }
 
-*,
+* {
+  box-sizing: border-box;
+}
+
 *::before,
 *::after {
   box-sizing: border-box;
-  margin: 0;
-  position: relative;
-  font-weight: normal;
+}
+
+html {
+  background: var(--surface-page);
 }
 
 body {
   display: flow-root;
   min-height: 100vh;
-  color: var(--gray-900);
-  background: var(--gray-0);
-  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--surface-page);
+  line-height: 1.55;
   font-family:
-    -apple-system, BlinkMacSystemFont, 'Noto Sans SC', 'Roboto', 'HarmonyOS Sans SC', 'Segoe UI',
-    'Helvetica Neue', Arial, sans-serif;
-  font-size: 15px;
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'PingFang SC',
+    'Microsoft YaHei',
+    sans-serif;
+  font-size: 16px;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  margin: 0;
 }
 
-/* layout */
+body,
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  border: none;
+  background: none;
+}
+
+#app {
+  min-height: 100vh;
+}
 
 .layout-container {
   width: 100%;
-  padding: 0px 30px;
+  padding: 0 30px;
 
   h2 {
     margin: 20px 0 10px 0;
   }
+}
+
+.page-shell {
+  width: min(100%, 1440px);
+  margin: 0 auto;
+  padding: 40px 32px 64px;
+}
+
+.page-panel {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  background: var(--surface-panel);
+  box-shadow: 0 18px 50px var(--shadow-1);
+}
+
+.page-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-elevated);
+  box-shadow: 0 12px 34px var(--shadow-0);
+}
+
+.ghost-button,
+.primary-button,
+.secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  transition:
+    color var(--transition-base),
+    background-color var(--transition-base),
+    border-color var(--transition-base),
+    box-shadow var(--transition-base);
+  cursor: pointer;
+}
+
+.ghost-button,
+.secondary-button {
+  color: var(--text-secondary);
+  background: var(--surface-panel);
+}
+
+.ghost-button:hover,
+.secondary-button:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.primary-button {
+  color: var(--text-inverse);
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.primary-button:hover {
+  background: var(--accent-primary-hover);
+  border-color: var(--accent-primary-hover);
 }
 
 .iconfont {
@@ -66,5 +157,112 @@ body {
   &.icon-24 {
     width: 24px;
     height: 24px;
+  }
+}
+
+.course-page,
+.conversation-page,
+.reading-page,
+.videos-page,
+.exercises-page,
+.guide-page,
+.ops-page,
+.feedback-page,
+.feedback-admin-page,
+.login-page,
+.register-page {
+  min-height: 100vh;
+  color: var(--text-primary);
+  background: var(--surface-page);
+}
+
+.course-page :is(.ant-card, .ant-modal-content, .ant-drawer-content),
+.conversation-page :is(.ant-card, .ant-modal-content, .ant-drawer-content),
+.reading-page :is(.ant-card, .ant-modal-content, .ant-drawer-content),
+.videos-page :is(.ant-card, .ant-modal-content, .ant-drawer-content),
+.exercises-page :is(.ant-card, .ant-modal-content, .ant-drawer-content),
+.guide-page :is(.ant-card, .ant-modal-content, .ant-drawer-content),
+.ops-page :is(.ant-card, .ant-modal-content, .ant-drawer-content),
+.feedback-page :is(.ant-card, .ant-modal-content, .ant-drawer-content),
+.feedback-admin-page :is(.ant-card, .ant-modal-content, .ant-drawer-content),
+.login-page :is(.ant-card, .ant-modal-content, .ant-drawer-content),
+.register-page :is(.ant-card, .ant-modal-content, .ant-drawer-content) {
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-elevated);
+  box-shadow: 0 14px 36px var(--shadow-0);
+}
+
+:is(.ant-btn-primary, .ant-btn-default.primary-button) {
+  border-color: var(--text-primary);
+  background: var(--text-primary);
+  color: var(--text-inverse);
+  box-shadow: none;
+}
+
+:is(.ant-btn-primary, .ant-btn-default.primary-button):hover,
+:is(.ant-btn-primary, .ant-btn-default.primary-button):focus {
+  border-color: var(--accent-primary-hover);
+  background: var(--accent-primary-hover);
+  color: var(--text-inverse);
+}
+
+:is(.ant-btn-default, .ant-input, .ant-input-number, .ant-select-selector, .ant-picker, .ant-input-affix-wrapper) {
+  border-color: var(--border-subtle) !important;
+  border-radius: var(--radius-md) !important;
+  background: var(--surface-input) !important;
+  box-shadow: none !important;
+}
+
+:is(.ant-btn-default, .ant-input, .ant-input-number, .ant-select-selector, .ant-picker, .ant-input-affix-wrapper):hover,
+:is(.ant-input, .ant-input-number, .ant-select-selector, .ant-picker, .ant-input-affix-wrapper):focus,
+:is(.ant-input-affix-wrapper-focused, .ant-select-focused .ant-select-selector) {
+  border-color: var(--border-strong) !important;
+  box-shadow: none !important;
+}
+
+:is(.ant-table-wrapper, .ant-list, .ant-tabs, .ant-collapse, .ant-upload-wrapper) {
+  color: var(--text-primary);
+}
+
+:is(.ant-table, .ant-table-container, .ant-table-thead > tr > th, .ant-table-tbody > tr > td) {
+  border-color: var(--border-subtle) !important;
+  background: var(--surface-elevated) !important;
+}
+
+:is(.ant-tabs-tab, .ant-form-item-label > label, .ant-typography) {
+  color: var(--text-primary);
+}
+
+:is(.ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn, .ant-tabs-tab:hover) {
+  color: var(--text-primary) !important;
+}
+
+.ant-tabs-ink-bar {
+  background: var(--text-primary) !important;
+}
+
+:is(.conversation-container, .reading-container, .videos-container, .exercises-container, .guide-container, .ops-container, .feedback-container) {
+  width: min(100%, 1440px);
+  margin: 0 auto;
+  padding: 32px;
+}
+
+:is(.conversation-card, .reading-card, .video-card, .exercise-card, .guide-card, .ops-card, .feedback-card, .stats-card, .metric-card) {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-elevated);
+  box-shadow: 0 12px 32px var(--shadow-0);
+}
+
+:is(.section-title, .panel-title, .card-title) {
+  color: var(--text-primary);
+  letter-spacing: -0.03em;
+}
+
+@media (max-width: 768px) {
+  .page-shell,
+  :is(.conversation-container, .reading-container, .videos-container, .exercises-container, .guide-container, .ops-container, .feedback-container) {
+    padding: 24px 18px 48px;
   }
 }

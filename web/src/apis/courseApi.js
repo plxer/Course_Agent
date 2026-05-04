@@ -2,7 +2,7 @@
  * 课程智能体 API（课本伴读、视频伴读、课程对话流）
  * 与后端 /api/course/* 对应
  */
-import { apiGet, apiPost, apiPut } from './base'
+import { apiGet, apiPost, apiPut, apiDelete, apiRequest } from './base'
 
 /** 根据首轮一问一答生成对话标题（需登录） */
 export async function generateConversationTitle(firstQuestion, firstAnswer) {
@@ -217,11 +217,7 @@ export function exerciseSubmit(payload) {
 
 /** 错题分析（与运维做题记录同源）：一次返回按知识点统计 + 错题列表第一页，用于弹窗作图与列表 */
 export function exerciseWrongAnalysis(page = 1, pageSize = 20) {
-  return apiGet(
-    `/api/course/exercises/wrong-analysis?page=${page}&page_size=${pageSize}`,
-    {},
-    true
-  )
+  return apiGet(`/api/course/exercises/wrong-analysis?page=${page}&page_size=${pageSize}`, {}, true)
 }
 
 /** 错题按知识点统计（环状图），与 wrong-analysis 同源 */
@@ -231,31 +227,58 @@ export function exerciseWrongStats() {
 
 /** 错题列表分页，与 wrong-analysis 同源 */
 export function exerciseWrongList(page = 1, pageSize = 20) {
-  return apiGet(
-    `/api/course/exercises/wrong-list?page=${page}&page_size=${pageSize}`,
-    {},
+  return apiGet(`/api/course/exercises/wrong-list?page=${page}&page_size=${pageSize}`, {}, true)
+}
+
+/** 课程对话默认智能体 */
+export function getCourseDefaultAgent() {
+  return apiGet('/api/chat/default_agent')
+}
+
+/** 课程对话历史 */
+export function getCourseAgentHistory(agentId, threadId) {
+  return apiGet(`/api/chat/agent/${agentId}/history?thread_id=${threadId}`)
+}
+
+/** 课程对话线程列表 */
+export function listCourseThreads(agentId, options = {}) {
+  const params = new URLSearchParams({ agent_id: agentId })
+  if (options.source) params.set('source', options.source)
+  return apiGet(`/api/chat/threads?${params.toString()}`)
+}
+
+/** 创建课程对话线程 */
+export function createCourseThread(agentId, title, metadata) {
+  return apiPost('/api/chat/thread', {
+    agent_id: agentId,
+    title: title || '新的对话',
+    metadata: metadata || {}
+  })
+}
+
+/** 更新课程对话线程 */
+export function updateCourseThread(threadId, title, description) {
+  return apiPut(`/api/chat/thread/${threadId}`, {
+    title,
+    description
+  })
+}
+
+/** 删除课程对话线程 */
+export function deleteCourseThread(threadId) {
+  return apiDelete(`/api/chat/thread/${threadId}`)
+}
+
+/** 课程页图片上传 */
+export function uploadCourseImage(file) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return apiRequest(
+    '/api/chat/image/upload',
+    {
+      method: 'POST',
+      body: formData
+    },
     true
   )
-}
-
-/** 当前用户积分 */
-export function getPoints() {
-  return apiGet('/api/course/points', {}, true)
-}
-
-// --- 积分商城 ---
-
-/** 商城称号列表 */
-export function mallList() {
-  return apiGet('/api/course/mall', {}, true)
-}
-
-/** 兑换称号 */
-export function mallPurchase(itemId) {
-  return apiPost('/api/course/mall/purchase', { item_id: itemId }, {}, true)
-}
-
-/** 我的称号 */
-export function mallMyTitles() {
-  return apiGet('/api/course/mall/my-titles', {}, true)
 }

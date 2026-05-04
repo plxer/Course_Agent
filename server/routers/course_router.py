@@ -1,11 +1,11 @@
 """课程智能体路由：课本伴读、视频伴读、课程对话流。"""
 
-import math
 import os
 import re
 import json
 import uuid
 import random
+import math
 from pathlib import Path
 from typing import Any
 
@@ -45,15 +45,18 @@ from server.utils.auth_middleware import get_db, get_required_user
 course = APIRouter(prefix="/course", tags=["course"])
 
 _EXERCISE_QUESTION_TYPES = frozenset({"choice", "multi_choice", "short_answer", "calculation"})
+_EXERCISE_TS_HALF_LIFE_DAYS = 14.0
+_EXERCISE_TS_DECAY_COUNT_CAP = 30.0
 
 
-def _knowledge_point_sampling_weight(wrong_attempts: int) -> float:
+def _sample_kp_score_with_thompson(wrong_attempts: float, correct_attempts: float) -> float:
     """
-    小测抽知识点时的权重：用于 random.choices(..., weights=)。
-    基线 1 保证每个知识点都有正概率；错题次数用平方根缓增，避免线性权重下单点错题过多时几乎垄断抽样。
+    Thompson Sampling（Beta-Bernoulli）采样得分，目标是优先抽到「更可能答错」的知识点。
+    posterior = Beta(1 + wrong_attempts, 1 + correct_attempts)
     """
-    w = max(0, int(wrong_attempts))
-    return 1.0 + math.sqrt(w)
+    a = 1.0 + max(0.0, float(wrong_attempts))
+    b = 1.0 + max(0.0, float(correct_attempts))
+    return random.betavariate(a, b)
 
 
 # 课本/视频根目录：KNOWLEDGEBASE_DIR 可设为绝对路径或相对「项目根」的片段。
@@ -147,6 +150,12 @@ def _list_pdf_books() -> list[dict]:
 # --- 视频列表与播放（knowledgebase/videos，文件名含 Chapter数字 按章节归类）---
 
 
+# 单独归类到「复习」章（展示在列表最后），与文件名是否含 Chapter 无关
+_REVIEW_VIDEO_STEM = "Review"
+# 排序用：大于任意常规章节号，保证「复习」在最后一章
+_REVIEW_CHAPTER_SORT_KEY = 9999
+
+
 def _list_videos() -> list[dict]:
     """扫描 videos 目录（含子目录）下的 .mp4，按文件名中的 Chapter 数字分组，返回 chapters 列表。"""
     root = _VIDEOS_DIR
@@ -154,11 +163,15 @@ def _list_videos() -> list[dict]:
         return []
     chapter_re = re.compile(r"Chapter\s*(\d+)", re.IGNORECASE)
     by_chapter: dict[int, list[dict]] = {}
+    review_videos: list[dict] = []
     for path in root.rglob("*.mp4"):
         try:
             stat = path.stat()
             stem = path.stem
             name = path.name
+            if stem == _REVIEW_VIDEO_STEM:
+                review_videos.append({"id": stem, "name": name, "size": stat.st_size})
+                continue
             m = chapter_re.search(stem)
             ch = int(m.group(1)) if m else 0
             if ch not in by_chapter:
@@ -168,7 +181,16 @@ def _list_videos() -> list[dict]:
             continue
     for vlist in by_chapter.values():
         vlist.sort(key=lambda x: x["name"])
-    chapters = [{"chapter": ch, "videos": vlist} for ch, vlist in sorted(by_chapter.items())]
+    review_videos.sort(key=lambda x: x["name"])
+    chapters: list[dict] = [{"chapter": ch, "videos": vlist} for ch, vlist in sorted(by_chapter.items())]
+    if review_videos:
+        chapters.append(
+            {
+                "chapter": _REVIEW_CHAPTER_SORT_KEY,
+                "chapter_label": "复习",
+                "videos": review_videos,
+            }
+        )
     return chapters
 
 
@@ -578,6 +600,115 @@ def _course_query_has_networking_keyword_hint(query: str) -> bool:
     return bool(_COURSE_QUERY_NETWORKING_HINT_RE.search(query or ""))
 
 
+# 无网络术语时的「对话延续 / 元追问」用语：单独一句常被 fast 模型误判为不相关
+_COURSE_DIALOGUE_FOLLOWUP_SUBSTRINGS: frozenset[str] = frozenset(
+    {
+        "没听懂",
+        "听不懂",
+        "听不太懂",
+        "不太懂",
+        "没太懂",
+        "不明白",
+        "不理解",
+        "没理解",
+        "还是不懂",
+        "仍不懂",
+        "不清楚",
+        "没听明白",
+        "看不太懂",
+        "啥意思",
+        "什么意思",
+        "怎么理解",
+        "如何理解",
+        "举个例子",
+        "举个栗子",
+        "举例说明",
+        "打个比方",
+        "能举例",
+        "能否举例",
+        "再举",
+        "多举几个",
+        "总结一下",
+        "归纳一下",
+        "简要总结",
+        "帮我总结",
+        "概括一下",
+        "简述",
+        "列要点",
+        "要点是什么",
+        "再说一遍",
+        "重复一遍",
+        "重讲",
+        "重新讲",
+        "展开讲讲",
+        "详细说说",
+        "详细说明",
+        "说详细点",
+        "多讲一点",
+        "接着说",
+        "继续说",
+        "还有呢",
+        "然后呢",
+        "对吗",
+        "对不对",
+        "是这样吗",
+        "确认一下",
+        "通俗",
+        "白话",
+        "简单点",
+        "用人话",
+        "易懂",
+        "英文怎么说",
+        "翻成英文",
+        "补充一下",
+        "再讲讲",
+        "继续讲",
+        "上面说的",
+        "刚才说的",
+        "你刚才",
+        "之前说的",
+        "前文",
+        "紧接着",
+        "那一点",
+        "这一点",
+        "为什么这么说",
+        "什么意思呢",
+        "展开",
+        "接着问",
+        "上文",
+        "前面说的",
+        "你前面",
+        "你上面",
+        "换句话说",
+        "换言之",
+    }
+)
+_COURSE_DIALOGUE_FOLLOWUP_EN_SNIPPETS: frozenset[str] = frozenset(
+    {
+        "summarize",
+        "summary",
+        "give an example",
+        "for example",
+        "i don't understand",
+        "i dont understand",
+        "explain again",
+        "more detail",
+        "simpler terms",
+    }
+)
+
+
+def _course_query_is_dialogue_followup(query: str) -> bool:
+    """是否为针对上一轮讲解的追问、举例、总结等（通常不含网络术语）。"""
+    q = (query or "").strip()
+    if not q or len(q) > 100:
+        return False
+    if any(s in q for s in _COURSE_DIALOGUE_FOLLOWUP_SUBSTRINGS):
+        return True
+    low = q.lower()
+    return any(s in low for s in _COURSE_DIALOGUE_FOLLOWUP_EN_SNIPPETS)
+
+
 async def _is_query_related_to_computer_networking(
     query: str,
     *,
@@ -595,6 +726,10 @@ async def _is_query_related_to_computer_networking(
     if _course_query_has_networking_keyword_hint(query):
         return True
 
+    # 举例/总结/没听懂等不含术语的跟进句，fast 模型易误判；课程页已限定知识库，直接放行
+    if _course_query_is_dialogue_followup(query):
+        return True
+
     from langchain_core.messages import HumanMessage, SystemMessage
 
     prompt = (
@@ -602,7 +737,11 @@ async def _is_query_related_to_computer_networking(
         "相关包括：网络协议与体系结构、TCP/IP、HTTP、DNS、路由与交换、SDN/NFV/OpenFlow、"
         "数据中心与云网络、无线与移动网络、网络安全、拥塞控制、Socket、QoS、CDN、P2P 等；"
         "含英文缩写的专业名词（如 SDN、BGP、MPLS）若属于网络领域，一律算相关。\n"
-        "不相关包括：与计算机网络无关的纯数学、其它工科课程、生活闲聊、与网络无关的通用编程语法等。\n"
+        "特别重要：若用户是在延续课程对话并提出举例、类比、总结、澄清、重讲、追问含义、对比、"
+        "翻译或表示没听懂等，即使当前一句里没有出现网络术语，只要可能是针对《计算机网络》内容的后续提问，"
+        "一律视为相关，回答 YES。\n"
+        "不相关包括：与计算机网络无关的纯数学、其它工科课程、明显与课程对话无关的生活闲聊、"
+        "与网络无关的通用编程语法等。\n"
         "只回答一个词：YES 或 NO。"
     )
     try:
@@ -1120,7 +1259,7 @@ async def _build_exercise_quiz_plan(
 ) -> list[dict[str, Any]]:
     """
     小测抽题位（题型 + 知识点），不调用 LLM。
-    与 generate-quiz 相同的错题加权抽样逻辑，供前端逐题调用 /exercises/generate。
+    与 generate-quiz 相同的 Thompson Sampling 抽样逻辑，供前端逐题调用 /exercises/generate。
     """
     question_sequence: list[str] = []
     for q_type, count in (body.question_type_counts or {}).items():
@@ -1152,30 +1291,58 @@ async def _build_exercise_quiz_plan(
 
     eligible_titles = [str(kp.get("title") or "") for kp in eligible_kps]
 
-    q_wrong = (
-        select(ExerciseAttempt.knowledge_point, func.count(ExerciseAttempt.id).label("count"))
+    q_stats = (
+        select(
+            ExerciseAttempt.knowledge_point,
+            ExerciseAttempt.is_correct,
+            ExerciseAttempt.created_at,
+        )
         .where(
             ExerciseAttempt.user_id == current_user.id,
-            ExerciseAttempt.is_correct == 0,
             ExerciseAttempt.chapter == str(body.chapter),
             ExerciseAttempt.knowledge_point.in_(eligible_titles),
         )
-        .group_by(ExerciseAttempt.knowledge_point)
     )
-    result = await db.execute(q_wrong)
-    wrong_rows = result.all()
-    wrong_cnt_by_title: dict[str, int] = {str(r[0] or "").strip() or "未分类": int(r[1] or 0) for r in wrong_rows}
-
-    weights = [
-        _knowledge_point_sampling_weight(
-            wrong_cnt_by_title.get(str(kp.get("title") or "").strip() or "未分类", 0)
-        )
-        for kp in eligible_kps
-    ]
+    result = await db.execute(q_stats)
+    stat_rows = result.all()
+    wrong_cnt_by_title: dict[str, float] = {}
+    correct_cnt_by_title: dict[str, float] = {}
+    now = utc_now_naive()
+    half_life = max(1.0, float(_EXERCISE_TS_HALF_LIFE_DAYS))
+    decay_lambda = math.log(2.0) / half_life
+    for row in stat_rows:
+        title = str(row[0] or "").strip() or "未分类"
+        is_correct = int(row[1] or 0)
+        created_at = row[2]
+        if created_at is None:
+            decay_weight = 1.0
+        else:
+            delta_days = max(0.0, (now - created_at).total_seconds() / 86400.0)
+            decay_weight = math.exp(-decay_lambda * delta_days)
+        if is_correct == 1:
+            correct_cnt_by_title[title] = correct_cnt_by_title.get(title, 0.0) + decay_weight
+        else:
+            wrong_cnt_by_title[title] = wrong_cnt_by_title.get(title, 0.0) + decay_weight
 
     plan: list[dict[str, Any]] = []
+    remaining_kps = eligible_kps[:]
     for q_type in question_sequence:
-        kp = random.choices(eligible_kps, weights=weights, k=1)[0]
+        if not remaining_kps:
+            remaining_kps = eligible_kps[:]
+        kp = max(
+            remaining_kps,
+            key=lambda item: _sample_kp_score_with_thompson(
+                min(
+                    wrong_cnt_by_title.get(str(item.get("title") or "").strip() or "未分类", 0.0),
+                    _EXERCISE_TS_DECAY_COUNT_CAP,
+                ),
+                min(
+                    correct_cnt_by_title.get(str(item.get("title") or "").strip() or "未分类", 0.0),
+                    _EXERCISE_TS_DECAY_COUNT_CAP,
+                ),
+            ),
+        )
+        remaining_kps = [item for item in remaining_kps if str(item.get("id")) != str(kp.get("id"))]
         plan.append(
             {
                 "question_type": q_type,

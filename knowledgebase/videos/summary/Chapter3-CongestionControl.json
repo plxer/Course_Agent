@@ -1,0 +1,54 @@
+{
+  "segments": [
+    {
+      "start_sec": 0,
+      "end_sec": 100,
+      "title": "TCP拥塞控制原理与基本概念"
+    },
+    {
+      "start_sec": 101,
+      "end_sec": 180,
+      "title": "回顾网络中的延迟和丢包产生原因"
+    },
+    {
+      "start_sec": 181,
+      "end_sec": 295,
+      "title": "拥塞控制概念、产生原因及解决的问题"
+    },
+    {
+      "start_sec": 296,
+      "end_sec": 380,
+      "title": "TCP运行层与路由器工作层对比及拥塞发生位置"
+    },
+    {
+      "start_sec": 381,
+      "end_sec": 475,
+      "title": "TCP端到端拥塞控制及其推断机制"
+    },
+    {
+      "start_sec": 476,
+      "end_sec": 610,
+      "title": "拥塞控制的目标和步骤：检测与控制"
+    },
+    {
+      "start_sec": 611,
+      "end_sec": 715,
+      "title": "拥塞控制与流量控制的区别"
+    },
+    {
+      "start_sec": 716,
+      "end_sec": 800,
+      "title": "端到端拥塞控制与网络辅助拥塞控制的对比"
+    },
+    {
+      "start_sec": 801,
+      "end_sec": 840,
+      "title": "网络辅助拥塞控制的原因与缺点"
+    },
+    {
+      "start_sec": 841,
+      "end_sec": 900,
+      "title": "端到端拥塞控制与网络辅助拥塞控制的具体方式与优缺点总结"
+    }
+  ]
+}

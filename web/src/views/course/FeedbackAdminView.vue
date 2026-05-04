@@ -1,34 +1,14 @@
 <template>
-  <div class="feedback-admin-container">
-    <header class="feedback-admin-header">
-      <div class="feedback-admin-header-content">
-        <router-link to="/" class="feedback-admin-logo">
-          <span class="feedback-admin-logo-text">天津大学《计算机网络》课程数智化平台</span>
-        </router-link>
-        <div class="feedback-admin-right">
-          <div class="feedback-admin-nav">
-            <router-link to="/conversation" class="feedback-admin-nav-link">对话</router-link>
-            <router-link to="/reading" class="feedback-admin-nav-link">课本伴读</router-link>
-            <router-link to="/videos" class="feedback-admin-nav-link">视频</router-link>
-            <router-link to="/exercises" class="feedback-admin-nav-link">习题推荐</router-link>
-            <router-link to="/ops" class="feedback-admin-nav-link">运维</router-link>
-            <router-link to="/guide" class="feedback-admin-nav-link">使用指南</router-link>
-          </div>
-          <div class="feedback-admin-auth">
-            <span class="feedback-admin-username">{{ userStore.username || userStore.userIdLogin }}</span>
-            <button type="button" class="feedback-admin-auth-btn" @click="handleLogout">退出</button>
-          </div>
-        </div>
-      </div>
-    </header>
+  <div class="feedback-admin-container course-page">
+    <CourseTopbar @logout="handleLogout" @switch-account="handleSwitchAccount" />
 
-    <main class="feedback-admin-main">
+    <main class="feedback-admin-main page-shell">
       <div class="feedback-admin-content">
-        <!-- 标题 -->
-        <div class="feedback-admin-title-section">
-          <h1 class="feedback-admin-title">用户反馈管理</h1>
-          <p class="feedback-admin-subtitle">查看和处理用户提交的反馈与建议</p>
-        </div>
+        <CoursePageHero
+          eyebrow="Feedback"
+          title="用户反馈管理"
+          subtitle="查看、筛选和处理课程平台的反馈与建议。"
+        />
 
         <!-- 统计卡片 -->
         <div class="feedback-stats-grid">
@@ -85,9 +65,7 @@
         <!-- 反馈列表 -->
         <div class="feedback-list-section">
           <div v-if="loading" class="feedback-loading">加载中...</div>
-          <div v-else-if="feedbacks.length === 0" class="feedback-empty">
-            暂无反馈数据
-          </div>
+          <div v-else-if="feedbacks.length === 0" class="feedback-empty">暂无反馈数据</div>
           <div v-else class="feedback-list">
             <div
               v-for="feedback in feedbacks"
@@ -113,7 +91,9 @@
               <div class="feedback-item-footer">
                 <span class="feedback-item-user">
                   用户: {{ feedback.username || '匿名用户' }}
-                  <span v-if="feedback.contact" class="feedback-item-contact">({{ feedback.contact }})</span>
+                  <span v-if="feedback.contact" class="feedback-item-contact"
+                    >({{ feedback.contact }})</span
+                  >
                 </span>
                 <span v-if="feedback.admin_reply" class="feedback-item-replied">已回复</span>
               </div>
@@ -159,7 +139,11 @@
             </div>
             <div class="feedback-detail-row">
               <span class="feedback-detail-label">状态:</span>
-              <select v-model="selectedFeedback.status" class="feedback-detail-status-select" @change="updateStatus">
+              <select
+                v-model="selectedFeedback.status"
+                class="feedback-detail-status-select"
+                @change="updateStatus"
+              >
                 <option value="pending">待处理</option>
                 <option value="processing">处理中</option>
                 <option value="resolved">已解决</option>
@@ -206,7 +190,10 @@
             </div>
             <div v-if="selectedFeedback.admin_reply" class="feedback-existing-reply">
               <div class="feedback-existing-reply-header">
-                <span>历史回复 ({{ selectedFeedback.replied_by }} - {{ formatTime(selectedFeedback.replied_at) }})</span>
+                <span
+                  >历史回复 ({{ selectedFeedback.replied_by }} -
+                  {{ formatTime(selectedFeedback.replied_at) }})</span
+                >
               </div>
               <div class="feedback-existing-reply-content">{{ selectedFeedback.admin_reply }}</div>
             </div>
@@ -227,6 +214,8 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import CourseTopbar from '@/components/course/CourseTopbar.vue'
+import CoursePageHero from '@/components/course/CoursePageHero.vue'
 import { useUserStore } from '@/stores/user'
 import { message } from 'ant-design-vue'
 import {

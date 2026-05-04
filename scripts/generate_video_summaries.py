@@ -4,6 +4,7 @@
 
 用法（在项目根目录，建议在 api 容器内执行）：
   uv run python scripts/generate_video_summaries.py
+  uv run python scripts/generate_video_summaries.py Review   # 仅处理指定 video_id（可多个）
   docker compose exec api uv run python scripts/generate_video_summaries.py
 """
 
@@ -126,13 +127,34 @@ async def generate_summary_for_caption(video_id: str, caption_path: Path, model)
         return None
 
 
+# 非单视频字幕的汇总文件，跳过
+_CAPTION_SKIP_NAMES = frozenset({"all_results.json"})
+
+
 async def main():
     if not _CAPTION_DIR.is_dir():
         logger.error("字幕目录不存在: %s", _CAPTION_DIR)
         return
     _SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
 
-    caption_files = list(_CAPTION_DIR.glob("*.json"))
+    argv_ids = [a.strip() for a in sys.argv[1:] if a.strip()]
+    if argv_ids:
+        caption_files = []
+        for vid in argv_ids:
+            p = _CAPTION_DIR / f"{vid}.json"
+            if p.is_file():
+                caption_files.append(p)
+            else:
+                logger.warning("未找到字幕文件: %s", p)
+        if not caption_files:
+            logger.error("没有可处理的字幕文件")
+            return
+    else:
+        caption_files = sorted(
+            p
+            for p in _CAPTION_DIR.glob("*.json")
+            if p.name not in _CAPTION_SKIP_NAMES
+        )
     if not caption_files:
         logger.info("未找到字幕文件: %s", _CAPTION_DIR)
         return

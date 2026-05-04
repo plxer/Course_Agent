@@ -26,7 +26,9 @@
       </div>
       <div class="setting-row">
         <div class="col-item">
-          <div class="setting-label">{{ items?.vision_model?.des || '含图对话模型（多模态）' }}</div>
+          <div class="setting-label">
+            {{ items?.vision_model?.des || '含图对话模型（多模态）' }}
+          </div>
           <div class="setting-content">
             <ModelSelectorComponent
               @select-model="handleVisionModelSelect"

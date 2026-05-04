@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { useAgentStore } from './agent'
 
 export const useUserStore = defineStore('user', () => {
   // 状态：token 优先从 localStorage（记住我）读取，否则从 sessionStorage（本次会话）读取
@@ -15,8 +14,6 @@ export const useUserStore = defineStore('user', () => {
   const userRole = ref('')
   const departmentId = ref(null)
   const departmentName = ref('')
-  /** 课程积分（null 表示未加载，用于避免习题/商城页先显示 0 再闪成正确值） */
-  const userPoints = ref(null)
 
   // 计算属性
   const isLoggedIn = computed(() => !!token.value)
@@ -91,11 +88,6 @@ export const useUserStore = defineStore('user', () => {
     userRole.value = ''
     departmentId.value = null
     departmentName.value = ''
-    userPoints.value = null
-
-    // 清除 agentStore 状态，确保重新登录时能正确加载数据
-    const agentStore = useAgentStore()
-    agentStore.reset()
 
     localStorage.removeItem('user_token')
     sessionStorage.removeItem('user_token')
@@ -403,10 +395,6 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
-  function setUserPoints(p) {
-    userPoints.value = p
-  }
-
   return {
     // 状态
     token,
@@ -418,7 +406,6 @@ export const useUserStore = defineStore('user', () => {
     userRole,
     departmentId,
     departmentName,
-    userPoints,
 
     // 计算属性
     isLoggedIn,
@@ -439,8 +426,7 @@ export const useUserStore = defineStore('user', () => {
     validateUsernameAndGenerateUserId,
     uploadAvatar,
     getCurrentUser,
-    updateProfile,
-    setUserPoints
+    updateProfile
   }
 })
 

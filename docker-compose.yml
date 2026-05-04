@@ -204,6 +204,8 @@ services:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
       MILVUS_LOG_LEVEL: error
+      MINIO_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-minioadmin}
     volumes:
       - ./docker/volumes/milvus/milvus:/var/lib/milvus
       - ./docker/volumes/milvus/logs:/var/lib/milvus/logs
@@ -219,8 +221,10 @@ services:
       - "19530:19530"
       - "9091:9091"
     depends_on:
-      - "etcd"
-      - "minio"
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
     networks:
       - app-network
     restart: unless-stopped

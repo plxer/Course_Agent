@@ -1,0 +1,39 @@
+{
+  "segments": [
+    {
+      "start_sec": 0,
+      "end_sec": 330,
+      "title": "绪论与Internet基本概念。"
+    },
+    {
+      "start_sec": 330,
+      "end_sec": 600,
+      "title": "可靠数据传输的需求与RDT协议的适用场景。"
+    },
+    {
+      "start_sec": 600,
+      "end_sec": 900,
+      "title": "RDT协议模型与有限状态自动机（FSM）的应用。"
+    },
+    {
+      "start_sec": 900,
+      "end_sec": 1200,
+      "title": "可靠信道上的RDT协议设计与FSM表示。"
+    },
+    {
+      "start_sec": 1500,
+      "end_sec": 1800,
+      "title": "发送端和接收端的FSM状态转换与操作。"
+    },
+    {
+      "start_sec": 1800,
+      "end_sec": 2100,
+      "title": "FSM在协议设计中的作用与重要性。"
+    },
+    {
+      "start_sec": 2100,
+      "end_sec": 2400,
+      "title": "RDT协议的进一步问题与课程设计任务介绍。"
+    }
+  ]
+}

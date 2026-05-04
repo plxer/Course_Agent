@@ -1,24 +1,22 @@
 # 项目简介
 
-Yuxi-Know（语析）是一个基于知识图谱和向量数据库的智能知识库系统，融合了 RAG（检索增强生成）技术与知识图谱技术，为用户提供智能问答和知识管理服务。
+课程智能体平台面向课程教学与学习场景，提供课程问答、课本伴读、视频伴读、习题推荐、错题分析和运维统计能力。
 
-**特点**：技术栈简单，易于上手，使用 MIT 开源协议，非常适合二次开发使用。
+## 技术栈
 
-### 技术栈选择
+- 后端服务：FastAPI + Python 3.12+
+- 前端界面：Vue 3 + Vite + Ant Design Vue
+- 数据库存储：PostgreSQL + MinIO
+- 知识检索：Milvus + LightRAG
+- 图数据库：Neo4j
+- 智能体框架：LangGraph
+- 文档与 OCR：RapidOCR、PaddleOCR、MinerU、PaddleX
+- 容器编排：Docker Compose
 
-- **后端服务**: [FastAPI](https://github.com/tiangolo/fastapi) + Python 3.12+
-- **前端界面**: [Vue.js 3](https://github.com/vuejs/vue) + [Ant Design Vue](https://github.com/vueComponent/ant-design-vue)
-- **数据库存储**: [PostgreSQL](https://github.com/postgres/postgres) + [MinIO](https://github.com/minio/minio)
-- **知识存储**: [Milvus](https://github.com/milvus-io/milvus)（向量数据库）+ [Neo4j](https://github.com/neo4j/neo4j)（图数据库）
-- **智能体框架**: [LangGraph](https://github.com/langchain-ai/langgraph)
-- **文档解析**: [LightRAG](https://github.com/HKUDS/LightRAG) + [MinerU](https://github.com/HKUDS/MinerU) + [PP-Structure-V3](https://github.com/PaddlePaddle/PaddleOCR)
-- **容器编排**: [Docker Compose](https://github.com/docker/compose)
+## 核心功能
 
-### 核心功能
-
-- **智能问答**: 支持多种大语言模型，提供智能对话和问答服务
-- **知识库管理**: 支持多种存储形式（Milvus、LightRAG）
-- **知识图谱**: 自动构建和可视化知识图谱，支持图查询
-- **文档解析**: 支持 PDF、Word、图片等多种格式的智能解析
-- **权限管理**: 基于部门的知识库访问控制
-- **内容安全**: 内置内容审查机制，保障服务合规性
+- 课程智能对话：围绕课程内容进行多轮问答与知识库检索。
+- 课本伴读：支持 PDF 浏览、页码跳转、选区 OCR、翻译和侧边问答。
+- 视频伴读：支持按章节组织课程视频、字幕读取和分段总结。
+- 习题推荐：按章节、知识点和题型生成练习，并记录答题结果。
+- 运维统计：集中查看用户、对话、做题和反馈数据。

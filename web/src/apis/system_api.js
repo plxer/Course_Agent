@@ -74,10 +74,10 @@ export const brandApi = {
   getInfoConfig: () => apiGet('/api/system/info', {}, false),
 
   /**
-   * 重新加载信息配置
+   * 重新加载信息配置（后端要求管理员身份）
    * @returns {Promise} - 重新加载结果
    */
-  reloadInfoConfig: async () => apiPost('/api/system/info/reload', {}, {}, false)
+  reloadInfoConfig: async () => apiAdminPost('/api/system/info/reload', {})
 }
 
 // =============================================================================

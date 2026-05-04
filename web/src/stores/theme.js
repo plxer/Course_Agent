@@ -1,42 +1,54 @@
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { theme } from 'ant-design-vue'
 
 export const useThemeStore = defineStore('theme', () => {
-  // 从 localStorage 读取保存的主题，默认为浅色
   const isDark = ref(localStorage.getItem('theme') === 'dark')
 
-  // 公共主题配置
   const commonTheme = {
     token: {
-      fontFamily:
-        "'HarmonyOS Sans SC', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;",
-      colorPrimary: '#198cb2',
-      borderRadius: 8,
-      wireframe: false
+      fontFamily: "'HarmonyOS Sans SC', 'Noto Sans SC', 'SF Pro Display', 'Segoe UI', sans-serif",
+      colorPrimary: '#56b0cb',
+      borderRadius: 14,
+      wireframe: false,
+      colorText: '#101418',
+      colorTextSecondary: 'rgba(16, 20, 24, 0.72)',
+      colorBgLayout: '#f5f7fa',
+      colorBgContainer: 'rgba(255, 255, 255, 0.92)',
+      colorBgElevated: 'rgba(255, 255, 255, 0.96)',
+      colorBorder: 'rgba(16, 20, 24, 0.08)',
+      colorBorderSecondary: 'rgba(16, 20, 24, 0.06)',
+      boxShadowSecondary: '0 18px 48px rgba(11, 18, 28, 0.08)'
     }
   }
 
-  // 浅色主题配置
   const lightTheme = {
     ...commonTheme
   }
 
-  // 深色主题配置
   const darkTheme = {
     ...commonTheme,
-    algorithm: theme.darkAlgorithm
+    algorithm: theme.darkAlgorithm,
+    token: {
+      ...commonTheme.token,
+      colorPrimary: '#56b0cb',
+      colorText: '#f3f7fb',
+      colorTextSecondary: 'rgba(243, 247, 251, 0.72)',
+      colorBgLayout: '#090d12',
+      colorBgContainer: '#121922',
+      colorBgElevated: '#161f2a',
+      colorBorder: 'rgba(243, 247, 251, 0.08)',
+      colorBorderSecondary: 'rgba(243, 247, 251, 0.06)',
+      boxShadowSecondary: '0 24px 60px rgba(0, 0, 0, 0.35)'
+    }
   }
 
-  // 当前主题配置
   const currentTheme = ref(isDark.value ? darkTheme : lightTheme)
 
-  // 切换主题
   function toggleTheme() {
     setTheme(!isDark.value)
   }
 
-  // 设置主题
   function setTheme(dark) {
     isDark.value = dark
     currentTheme.value = dark ? darkTheme : lightTheme
@@ -44,7 +56,6 @@ export const useThemeStore = defineStore('theme', () => {
     updateDocumentTheme()
   }
 
-  // 更新 document 的主题类
   function updateDocumentTheme() {
     if (isDark.value) {
       document.documentElement.classList.add('dark')
@@ -53,7 +64,6 @@ export const useThemeStore = defineStore('theme', () => {
     }
   }
 
-  // 初始化时设置主题
   updateDocumentTheme()
 
   return {

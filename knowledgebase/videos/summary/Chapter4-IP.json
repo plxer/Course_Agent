@@ -1,0 +1,54 @@
+{
+  "segments": [
+    {
+      "start_sec": 0,
+      "end_sec": 180,
+      "title": "网络协议栈的基本概念及各层的功能"
+    },
+    {
+      "start_sec": 180,
+      "end_sec": 360,
+      "title": "路由器的构造和功能，网络互连的基础设施"
+    },
+    {
+      "start_sec": 360,
+      "end_sec": 540,
+      "title": "路由器和主机的转发与路由功能对比"
+    },
+    {
+      "start_sec": 540,
+      "end_sec": 720,
+      "title": "转发与路由的协作，路由算法和路由表"
+    },
+    {
+      "start_sec": 720,
+      "end_sec": 960,
+      "title": "网络层协议IP和ICMP的作用"
+    },
+    {
+      "start_sec": 960,
+      "end_sec": 1200,
+      "title": "IP数据报格式及其头部各字段的意义"
+    },
+    {
+      "start_sec": 1200,
+      "end_sec": 1440,
+      "title": "TTL的作用及数据包在网络中的处理"
+    },
+    {
+      "start_sec": 1440,
+      "end_sec": 1680,
+      "title": "IP数据包分片历史上的问题及其解决"
+    },
+    {
+      "start_sec": 1680,
+      "end_sec": 1920,
+      "title": "最大包长的限制及数据链路层技术"
+    },
+    {
+      "start_sec": 1920,
+      "end_sec": 2100,
+      "title": "IP数据报格式的历史性问题的现状"
+    }
+  ]
+}

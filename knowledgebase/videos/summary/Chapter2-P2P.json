@@ -1,0 +1,49 @@
+{
+  "segments": [
+    {
+      "start_sec": 2,
+      "end_sec": 190,
+      "title": "绪论与P2P架构概述，以及与CS架构的对比。"
+    },
+    {
+      "start_sec": 191,
+      "end_sec": 480,
+      "title": "Client-Server架构的特点和要求，包括对Server的高要求和对Client的低要求。"
+    },
+    {
+      "start_sec": 481,
+      "end_sec": 750,
+      "title": "P2P架构的特点，例如节点之间的对等性、无固定IP地址、无需高并发能力等。"
+    },
+    {
+      "start_sec": 751,
+      "end_sec": 1040,
+      "title": "P2P架构的优势，如数据分散存储、对节点和服务器要求较低等。"
+    },
+    {
+      "start_sec": 1041,
+      "end_sec": 1360,
+      "title": "P2P架构的缺点，主要是节点管理和数据管理方面的复杂性。"
+    },
+    {
+      "start_sec": 1361,
+      "end_sec": 1670,
+      "title": "P2P在文件分发应用上的性能优势，通过数学公式和图示说明。"
+    },
+    {
+      "start_sec": 1671,
+      "end_sec": 1950,
+      "title": "BitTorrent的实现原理，包括tracker的管理功能和peer之间的通信。"
+    },
+    {
+      "start_sec": 1951,
+      "end_sec": 2220,
+      "title": "BitTorrent的激励机制，如tit-for-tat策略和realist first策略。"
+    },
+    {
+      "start_sec": 2221,
+      "end_sec": 2270,
+      "title": "总结P2P和CS架构的选择依据，应根据具体应用需求来决定。"
+    }
+  ]
+}

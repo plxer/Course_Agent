@@ -209,7 +209,7 @@ const copyDatabaseId = async () => {
 
 // 返回数据库列表
 const backToDatabase = () => {
-  router.push('/database')
+  router.push('/course')
 }
 
 // 编辑相关逻辑（复用自 DatabaseHeader）

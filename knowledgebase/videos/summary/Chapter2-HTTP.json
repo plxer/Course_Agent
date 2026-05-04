@@ -1,0 +1,64 @@
+{
+  "segments": [
+    {
+      "start_sec": 0,
+      "end_sec": 330,
+      "title": "Web应用与HTTP基本概念"
+    },
+    {
+      "start_sec": 30,
+      "end_sec": 600,
+      "title": "网页组成与Web服务功能"
+    },
+    {
+      "start_sec": 600,
+      "end_sec": 940,
+      "title": "HTTP协议需求与Client-Server架构"
+    },
+    {
+      "start_sec": 940,
+      "end_sec": 1210,
+      "title": "HTTP协议的网络服务性能需求"
+    },
+    {
+      "start_sec": 1210,
+      "end_sec": 1500,
+      "title": "TCP协议与HTTP连接建立"
+    },
+    {
+      "start_sec": 1500,
+      "end_sec": 1830,
+      "title": "HTTP连接的持续与非持续传输"
+    },
+    {
+      "start_sec": 1830,
+      "end_sec": 2100,
+      "title": "非持续连接的响应时间分析"
+    },
+    {
+      "start_sec": 2100,
+      "end_sec": 2400,
+      "title": "持续连接与流水线传输方式"
+    },
+    {
+      "start_sec": 2400,
+      "end_sec": 2700,
+      "title": "HTTP协议的header格式与message类型"
+    },
+    {
+      "start_sec": 2700,
+      "end_sec": 3000,
+      "title": "HTTP协议的request与response格式"
+    },
+    {
+      "start_sec": 3000,
+      "end_sec": 3300,
+      "title": "状态码在协议设计中的应用"
+    },
+    {
+      "start_sec": 3300,
+      "end_sec": 3600,
+      "title": "总结与下周内容预告"
+    }
+  ]
+}

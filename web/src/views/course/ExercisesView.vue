@@ -1,44 +1,19 @@
 <template>
-  <div class="exercises-container">
-    <header class="exercises-header">
-      <div class="exercises-header-content">
-        <router-link to="/" class="exercises-logo">
-          <span class="exercises-logo-text">天津大学《计算机网络》课程数智化平台</span>
-        </router-link>
-        <div class="exercises-right">
-          <div class="exercises-nav">
-            <router-link to="/conversation" class="exercises-nav-link" :class="{ active: $route.path === '/conversation' || $route.path === '/course' }">对话</router-link>
-            <router-link to="/reading" class="exercises-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
-            <router-link to="/videos" class="exercises-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
-            <router-link to="/exercises" class="exercises-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
-            <router-link v-if="userStore.isAdmin" to="/ops" class="exercises-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
-            <router-link to="/guide" class="exercises-nav-link" :class="{ active: $route.path === '/guide' }">使用指南</router-link>
-          </div>
-          <div class="exercises-auth">
-            <template v-if="!userStore.isLoggedIn">
-              <router-link to="/login" class="exercises-auth-link">登录</router-link>
-              <router-link to="/register" class="exercises-auth-link primary">注册</router-link>
-            </template>
-            <template v-else>
-              <div class="exercises-points-link" style="cursor: default; pointer-events: none;">
-                <span class="exercises-points-num">{{ pointsDisplay }}</span>
-                <span class="exercises-points-label">积分</span>
-              </div>
-              <button type="button" class="exercises-auth-btn" @click="openWrongModal">错题分析</button>
-              <span class="exercises-username">{{ userStore.username || userStore.userIdLogin }}</span>
-              <button type="button" class="exercises-auth-btn" @click="handleSwitchAccount">切换账号</button>
-              <button type="button" class="exercises-auth-btn" @click="handleLogout">退出</button>
-            </template>
-          </div>
-        </div>
-      </div>
-    </header>
+  <div class="exercises-container course-page">
+    <CourseTopbar @logout="handleLogout" @switch-account="handleSwitchAccount">
+      <template #auth-extra>
+        <button type="button" class="course-topbar__button" @click="openWrongModal">
+          错题分析
+        </button>
+      </template>
+    </CourseTopbar>
 
-    <main class="exercises-main">
-      <div class="exercises-title-section">
-        <h1 class="exercises-title">习题推荐</h1>
-        <p class="exercises-subtitle">选择章节与题型数量，一次生成小测；默认按错题情况个性化抽取知识点</p>
-      </div>
+    <main class="exercises-main page-shell">
+      <CoursePageHero
+        eyebrow="Practice"
+        title="习题推荐"
+        subtitle="选择章节与题型，快速生成围绕个人薄弱点的课程练习。"
+      />
 
       <!-- 题型 + 知识点选择 -->
       <section class="exercises-select-section">
@@ -70,37 +45,182 @@
           </div>
         </div>
 
-        <h2 class="exercises-section-title">选择章节</h2>
+        <h2 class="exercises-section-title">选择章节与知识点</h2>
         <div v-if="chaptersLoading" class="exercises-chapters-loading">加载章节目录中…</div>
         <div v-else-if="chaptersError" class="exercises-chapters-error">
           {{ chaptersError }}
           <button type="button" class="exercises-retry-btn" @click="loadChapters">重试</button>
         </div>
-        <div v-else class="exercises-knowledge-grid">
-          <button
-            v-for="ch in chapters"
-            :key="ch.id"
-            type="button"
-            class="exercises-knowledge-btn"
-            :style="isChapterSelected(ch.id) ? selectedBtnStyle : undefined"
-            @click="onSelectChapter(ch)"
-          >
-            {{ ch.title }}
-          </button>
-        </div>
+        <div v-else class="exercises-graph-card">
+          <div class="exercises-graph-header">
+            <div>
+              <p class="exercises-graph-kicker">
+                {{ selectedChapter ? 'Chapter Map' : 'Course Map' }}
+              </p>
+              <h3 class="exercises-graph-title">
+                {{ selectedChapter ? selectedChapter.title : '点击章节节点展开知识图谱' }}
+              </h3>
+            </div>
+            <button
+              v-if="selectedChapter"
+              type="button"
+              class="exercises-graph-reset-btn"
+              @click="resetChapterGraph"
+            >
+              返回章节图谱
+            </button>
+          </div>
 
-        <h2 v-if="selectedChapter" class="exercises-section-title">选择知识点(可多选)</h2>
-        <div v-if="selectedChapter" class="exercises-knowledge-grid">
-          <button
-            v-for="kp in selectedChapter.knowledge_points"
-            :key="kp.id"
-            type="button"
-            class="exercises-knowledge-btn"
-          :style="isKnowledgePointSelected(kp.id) ? selectedBtnStyle : undefined"
-          @click="toggleKnowledgePoint(kp.id)"
-          >
-            {{ kp.title }}
-          </button>
+          <div class="exercises-graph-stage">
+            <svg
+              class="exercises-knowledge-graph"
+              viewBox="0 0 720 420"
+              role="img"
+              :aria-label="selectedChapter ? `${selectedChapter.title} 知识点图谱` : '课程章节图谱'"
+            >
+              <template v-if="!selectedChapter">
+                <g class="exercises-graph-hub" :style="{ opacity: chapterHubOpacity }">
+                  <circle cx="360" cy="210" r="78" />
+                  <text x="360" y="205" text-anchor="middle">课程</text>
+                  <text x="360" y="228" text-anchor="middle">章节</text>
+                </g>
+                <g class="exercises-graph-edges-chapter" :style="{ opacity: chapterEdgesOpacity }">
+                  <line
+                    v-for="node in chapterGraphNodesDisplay"
+                    :key="`chapter-edge-${node.id}`"
+                    class="exercises-graph-edge"
+                    x1="360"
+                    y1="210"
+                    :x2="node.x"
+                    :y2="node.y"
+                  />
+                </g>
+                <g
+                  v-for="node in chapterGraphNodesDisplay"
+                  :key="`chapter-${node.id}`"
+                  class="exercises-graph-node exercises-graph-node--chapter"
+                  :class="{
+                    'is-selected': isChapterSelected(node.id),
+                    'is-drill-muted': node.groupOpacity < 0.06
+                  }"
+                  :style="{ opacity: node.groupOpacity }"
+                  role="button"
+                  tabindex="0"
+                  :aria-label="`选择章节 ${node.title}`"
+                  @click="onSelectChapter(node.raw)"
+                  @keydown.enter.prevent="onSelectChapter(node.raw)"
+                  @keydown.space.prevent="onSelectChapter(node.raw)"
+                >
+                  <circle :cx="node.x" :cy="node.y" :r="node.r" />
+                  <text
+                    :x="node.x"
+                    :y="node.labelY"
+                    text-anchor="middle"
+                    :style="{ fontSize: `${node.fontSize}px` }"
+                  >
+                    <tspan
+                      v-for="(line, lineIndex) in node.labelLines"
+                      :key="lineIndex"
+                      :x="node.x"
+                      :dy="lineIndex === 0 ? 0 : node.lineHeight"
+                    >
+                      {{ line }}
+                    </tspan>
+                  </text>
+                  <text
+                    :x="node.x"
+                    :y="node.y + node.r - 12"
+                    text-anchor="middle"
+                    class="exercises-graph-node-meta"
+                    :style="{ opacity: node.metaOpacity }"
+                  >
+                    {{ node.knowledgeCount }} 点
+                  </text>
+                </g>
+              </template>
+
+              <transition v-else name="exercises-graph-kp" appear>
+                <g :key="selectedChapter.id" class="exercises-graph-kp-bundle">
+                  <line
+                    v-for="node in knowledgePointGraphNodes"
+                    :key="`kp-edge-${node.id}`"
+                    class="exercises-graph-edge"
+                    :class="{ 'is-selected': isKnowledgePointSelected(node.id) }"
+                    x1="360"
+                    y1="210"
+                    :x2="node.x"
+                    :y2="node.y"
+                  />
+                  <g class="exercises-graph-center-node">
+                    <circle cx="360" cy="210" r="78" />
+                    <text
+                      x="360"
+                      :y="selectedChapterCenterLabel.y"
+                      text-anchor="middle"
+                      :style="{ fontSize: `${selectedChapterCenterLabel.fontSize}px` }"
+                    >
+                      <tspan
+                        v-for="(line, lineIndex) in selectedChapterCenterLabel.lines"
+                        :key="lineIndex"
+                        x="360"
+                        :dy="lineIndex === 0 ? 0 : selectedChapterCenterLabel.lineHeight"
+                      >
+                        {{ line }}
+                      </tspan>
+                    </text>
+                    <text x="360" y="252" text-anchor="middle" class="exercises-graph-node-meta">
+                      {{ selectedChapterKnowledgePoints.length }} 个知识点
+                    </text>
+                  </g>
+                  <g
+                    v-for="node in knowledgePointGraphNodes"
+                    :key="`kp-${node.id}`"
+                    class="exercises-graph-node exercises-graph-node--kp"
+                    :class="{ 'is-selected': isKnowledgePointSelected(node.id) }"
+                    role="button"
+                    tabindex="0"
+                    :aria-pressed="isKnowledgePointSelected(node.id)"
+                    :aria-label="`${isKnowledgePointSelected(node.id) ? '取消选择' : '选择'}知识点 ${node.title}`"
+                    @click="toggleKnowledgePoint(node.id)"
+                    @keydown.enter.prevent="toggleKnowledgePoint(node.id)"
+                    @keydown.space.prevent="toggleKnowledgePoint(node.id)"
+                  >
+                    <circle :cx="node.x" :cy="node.y" :r="node.r" />
+                    <text
+                      :x="node.x"
+                      :y="node.labelY"
+                      text-anchor="middle"
+                      :style="{ fontSize: `${node.fontSize}px` }"
+                    >
+                      <tspan
+                        v-for="(line, lineIndex) in node.labelLines"
+                        :key="lineIndex"
+                        :x="node.x"
+                        :dy="lineIndex === 0 ? 0 : node.lineHeight"
+                      >
+                        {{ line }}
+                      </tspan>
+                    </text>
+                  </g>
+                </g>
+              </transition>
+            </svg>
+            <p
+              v-if="selectedChapter && !selectedChapterKnowledgePoints.length"
+              class="exercises-graph-empty"
+            >
+              当前章节暂无知识点，可直接按章节生成题目。
+            </p>
+          </div>
+
+          <div class="exercises-graph-summary">
+            <span v-if="selectedChapter">已选择章节：{{ selectedChapter.title }}</span>
+            <span v-else>请先点击一个章节节点。</span>
+            <span v-if="selectedKnowledgePointIds.length">
+              已选择 {{ selectedKnowledgePointIds.length }} 个知识点
+            </span>
+            <span v-else-if="selectedChapter">未选择知识点，将使用该章节全部知识点</span>
+          </div>
         </div>
 
         <div class="exercises-generate-row">
@@ -123,11 +243,13 @@
               清除
             </button>
           </div>
-          <button type="button" class="exercises-history-btn" @click="openQuizHistoryModal">历史记录</button>
+          <button type="button" class="exercises-history-btn" @click="openQuizHistoryModal">
+            历史记录
+          </button>
         </div>
-      <p v-if="totalQuestionCount > QUIZ_MAX_QUESTIONS" class="exercises-quiz-limit-hint">
-        每次小测最多 {{ QUIZ_MAX_QUESTIONS }} 道题，请减少各题型数量后再点击「生成题目」。
-      </p>
+        <p v-if="totalQuestionCount > QUIZ_MAX_QUESTIONS" class="exercises-quiz-limit-hint">
+          每次小测最多 {{ QUIZ_MAX_QUESTIONS }} 道题，请减少各题型数量后再点击「生成题目」。
+        </p>
       </section>
 
       <!-- 题目与作答 -->
@@ -136,14 +258,27 @@
           <div v-if="currentQuestion.textbook_used" class="exercises-textbook-badge-row">
             <p class="exercises-textbook-badge">
               本题结合课本：第{{ currentQuestion.chapter }}章
-              <template v-if="currentQuestion.section_id"> §{{ currentQuestion.section_id }}</template>
-              <template v-if="currentQuestion.section_title"> {{ currentQuestion.section_title }}</template>
+              <template v-if="currentQuestion.section_id">
+                §{{ currentQuestion.section_id }}</template
+              >
+              <template v-if="currentQuestion.section_title">
+                {{ currentQuestion.section_title }}</template
+              >
             </p>
-            <button type="button" class="exercises-detail-btn" @click="textbookDetailVisible = true">详情</button>
+            <button
+              type="button"
+              class="exercises-detail-btn"
+              @click="textbookDetailVisible = true"
+            >
+              详情
+            </button>
           </div>
           <div class="exercises-question-body">
             <p class="exercises-question-text">{{ currentQuestion.content }}</p>
-            <div v-if="currentQuestion.question_type === 'choice' && currentQuestion.options?.length" class="exercises-options">
+            <div
+              v-if="currentQuestion.question_type === 'choice' && currentQuestion.options?.length"
+              class="exercises-options"
+            >
               <div
                 v-for="(opt, idx) in currentQuestion.options"
                 :key="idx"
@@ -157,10 +292,19 @@
                   v-model="userAnswer"
                   class="exercises-option-radio"
                 />
-                <label :for="'opt-' + currentQuestionIndex + '-' + idx" class="exercises-option-label">{{ opt }}</label>
+                <label
+                  :for="'opt-' + currentQuestionIndex + '-' + idx"
+                  class="exercises-option-label"
+                  >{{ opt }}</label
+                >
               </div>
             </div>
-            <div v-if="currentQuestion.question_type === 'multi_choice' && currentQuestion.options?.length" class="exercises-options">
+            <div
+              v-if="
+                currentQuestion.question_type === 'multi_choice' && currentQuestion.options?.length
+              "
+              class="exercises-options"
+            >
               <div
                 v-for="(opt, idx) in currentQuestion.options"
                 :key="'m-' + idx"
@@ -173,7 +317,11 @@
                   v-model="multiChoiceLetters"
                   class="exercises-option-checkbox"
                 />
-                <label :for="'mopt-' + currentQuestionIndex + '-' + idx" class="exercises-option-label">{{ opt }}</label>
+                <label
+                  :for="'mopt-' + currentQuestionIndex + '-' + idx"
+                  class="exercises-option-label"
+                  >{{ opt }}</label
+                >
               </div>
             </div>
           </div>
@@ -182,13 +330,19 @@
               <p class="exercises-answer-hint">请在上方选择选项后提交。</p>
             </template>
             <template v-else-if="currentQuestion.question_type === 'multi_choice'">
-              <p class="exercises-answer-hint">请在上方勾选你认为正确的所有选项后提交（可多选）。</p>
+              <p class="exercises-answer-hint">
+                请在上方勾选你认为正确的所有选项后提交（可多选）。
+              </p>
             </template>
             <template v-else>
               <textarea
                 v-model="userAnswer"
                 class="exercises-answer-input"
-                :placeholder="currentQuestion.question_type === 'calculation' ? '请输入计算过程与最终结果（仅可提交一次）' : '请输入你的答案（仅可提交一次）'"
+                :placeholder="
+                  currentQuestion.question_type === 'calculation'
+                    ? '请输入计算过程与最终结果（仅可提交一次）'
+                    : '请输入你的答案（仅可提交一次）'
+                "
                 rows="4"
               />
             </template>
@@ -262,7 +416,9 @@
         <p class="exercises-textbook-detail-meta">
           第{{ currentQuestion.chapter }}章
           <template v-if="currentQuestion.section_id"> §{{ currentQuestion.section_id }}</template>
-          <template v-if="currentQuestion.section_title"> {{ currentQuestion.section_title }}</template>
+          <template v-if="currentQuestion.section_title">
+            {{ currentQuestion.section_title }}</template
+          >
         </p>
         <div
           class="exercises-textbook-detail-content exercises-textbook-detail-markdown"
@@ -289,10 +445,18 @@
             <a href="javascript:void(0)" @click.prevent="retryWrongLoad">重试</a>
           </span>
           <span v-else>
-            当前账号（{{ wrongApiUserLogin || currentUserLabel }}）
-            共 <strong>{{ wrongTotalAttempts ?? '—' }}</strong> 次作答，<strong>{{ wrongTotal }}</strong> 道错题
-            按知识点：{{ (wrongStats || []).length }} 个
-            <a href="javascript:void(0)" class="wrong-refresh-btn" @click.prevent="refreshWrongAnalysis" :class="{ loading: wrongAnalysisLoading }">刷新</a>
+            当前账号（{{ wrongApiUserLogin || currentUserLabel }}） 共
+            <strong>{{ wrongTotalAttempts ?? '—' }}</strong> 次作答，<strong>{{
+              wrongTotal
+            }}</strong>
+            道错题 按知识点：{{ (wrongStats || []).length }} 个
+            <a
+              href="javascript:void(0)"
+              class="wrong-refresh-btn"
+              @click.prevent="refreshWrongAnalysis"
+              :class="{ loading: wrongAnalysisLoading }"
+              >刷新</a
+            >
           </span>
         </p>
         <div ref="wrongChartRef" class="wrong-chart" />
@@ -302,29 +466,46 @@
             <template v-if="wrongAnalysisLoading">加载错题记录中…</template>
             <template v-else-if="!wrongStatsLoadError && !wrongListLoadError">
               <template v-if="wrongTotalAttempts === 0">
-                未查询到当前账号的作答记录。请确认：1）提交答案时已登录且为当前账号「{{ wrongApiUserLogin || currentUserLabel }}」；2）运维中若能看到作答记录，请确认筛选的用户与此处一致；3）提交后刷新或重新打开本弹窗。
-                <span v-if="wrongDebugTableTotal != null" class="wrong-list-empty-hint">（表中总记录数：{{ wrongDebugTableTotal }}，若大于 0 说明其他用户有数据，当前账号筛选结果为空）</span>
+                未查询到当前账号的作答记录。请确认：1）提交答案时已登录且为当前账号「{{
+                  wrongApiUserLogin || currentUserLabel
+                }}」；2）运维中若能看到作答记录，请确认筛选的用户与此处一致；3）提交后刷新或重新打开本弹窗。
+                <span v-if="wrongDebugTableTotal != null" class="wrong-list-empty-hint"
+                  >（表中总记录数：{{ wrongDebugTableTotal }}，若大于 0
+                  说明其他用户有数据，当前账号筛选结果为空）</span
+                >
               </template>
               <template v-else>
                 暂无错题记录。答错题目并提交后，将在此显示按知识点的错题统计（环状图）与错题列表。
-                <br /><span class="wrong-list-empty-hint">此处仅显示当前登录账号的错题；运维中的做题记录包含所有用户。</span>
+                <br /><span class="wrong-list-empty-hint"
+                  >此处仅显示当前登录账号的错题；运维中的做题记录包含所有用户。</span
+                >
               </template>
             </template>
             <template v-else>加载失败或未登录，请重试。</template>
           </div>
           <div v-else class="wrong-list-items">
             <div v-for="item in wrongList" :key="item.id" class="wrong-list-item">
-              <div class="wrong-item-question wrong-item-markdown" v-html="renderTextbookMarkdown(item.question_content || '')"></div>
+              <div
+                class="wrong-item-question wrong-item-markdown"
+                v-html="renderTextbookMarkdown(item.question_content || '')"
+              ></div>
               <p class="wrong-item-meta">
-            {{ exerciseQuestionTypeLabel(item.question_type) }}
-            · 知识点：{{ item.knowledge_point }}
-            {{ item.section_title ? ` · ${item.section_title}` : '' }}
-          </p>
+                {{ exerciseQuestionTypeLabel(item.question_type) }}
+                · 知识点：{{ item.knowledge_point }}
+                {{ item.section_title ? ` · ${item.section_title}` : '' }}
+              </p>
               <div v-if="item.user_answer" class="wrong-item-answer">
                 <strong>你的答案：</strong>
-                <div class="wrong-item-markdown" v-html="renderTextbookMarkdown(item.user_answer)"></div>
+                <div
+                  class="wrong-item-markdown"
+                  v-html="renderTextbookMarkdown(item.user_answer)"
+                ></div>
               </div>
-              <div v-if="item.explanation" class="wrong-item-explanation wrong-item-markdown" v-html="renderTextbookMarkdown(item.explanation)"></div>
+              <div
+                v-if="item.explanation"
+                class="wrong-item-explanation wrong-item-markdown"
+                v-html="renderTextbookMarkdown(item.explanation)"
+              ></div>
             </div>
           </div>
           <a-pagination
@@ -346,14 +527,27 @@
       :footer="null"
       destroy-on-close
     >
-      <div v-if="!quizHistoryList.length" class="exercises-history-empty">暂无历史小测。完成一次小测后会自动保存。</div>
+      <div v-if="!quizHistoryList.length" class="exercises-history-empty">
+        暂无历史小测。完成一次小测后会自动保存。
+      </div>
       <ul v-else class="exercises-history-list">
         <li v-for="item in quizHistoryList" :key="item.id" class="exercises-history-item">
           <div class="exercises-history-item-main">
-            <span class="exercises-history-item-title">{{ item.chapterTitle || '未知章节' }} · 共 {{ item.questionCount ?? item.quizQuestions?.length ?? 0 }} 题</span>
-            <span class="exercises-history-item-time">{{ formatQuizHistoryTime(item.savedAt) }}</span>
+            <span class="exercises-history-item-title"
+              >{{ item.chapterTitle || '未知章节' }} · 共
+              {{ item.questionCount ?? item.quizQuestions?.length ?? 0 }} 题</span
+            >
+            <span class="exercises-history-item-time">{{
+              formatQuizHistoryTime(item.savedAt)
+            }}</span>
           </div>
-          <button type="button" class="exercises-history-open-btn" @click="restoreQuizFromHistory(item)">打开</button>
+          <button
+            type="button"
+            class="exercises-history-open-btn"
+            @click="restoreQuizFromHistory(item)"
+          >
+            打开
+          </button>
         </li>
       </ul>
     </a-modal>
@@ -361,20 +555,21 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { useUserStore } from '@/stores/user'
 import { marked } from 'marked'
 import * as echarts from 'echarts'
+import CourseTopbar from '@/components/course/CourseTopbar.vue'
+import CoursePageHero from '@/components/course/CoursePageHero.vue'
 import {
   getTextbookChapters,
   exerciseQuizPlan,
   exerciseGenerate,
   exerciseSubmit,
   exerciseWrongAnalysis,
-  exerciseWrongList,
-  getPoints
+  exerciseWrongList
 } from '@/apis/courseApi'
 
 const router = useRouter()
@@ -423,7 +618,13 @@ const DEFAULT_TYPE_COUNTS = () => ({
 })
 
 function parseMultiChoiceLetters(s) {
-  return [...new Set(String(s || '').toUpperCase().match(/[A-D]/g) || [])].sort()
+  return [
+    ...new Set(
+      String(s || '')
+        .toUpperCase()
+        .match(/[A-D]/g) || []
+    )
+  ].sort()
 }
 
 function formatMultiChoiceAnswer(s) {
@@ -445,8 +646,133 @@ const selectedChapter = computed(() => {
   return chapters.value.find((c) => String(c.id) === String(selectedChapterId.value)) ?? null
 })
 
-const selectedBtnStyle = { backgroundColor: '#1A365D', color: '#fff', borderColor: '#1A365D' }
+const GRAPH_CENTER = { x: 360, y: 210 }
+const GRAPH_CHAPTER_HUB_R = 78
+const GRAPH_RADIUS_X = 270
+const GRAPH_RADIUS_Y = 145
+
+/** 章节 → 知识点：先播放「选中章节飞向中心、其余淡出」再切换视图 */
+const chapterDrillAnim = ref(null)
+let chapterDrillRafId = null
+
+function easeOutCubic(t) {
+  return 1 - (1 - t) ** 3
+}
+
+const chapterHubOpacity = computed(() => {
+  if (!chapterDrillAnim.value) return 1
+  return Math.max(0, 1 - chapterDrillAnim.value.t)
+})
+
+const chapterEdgesOpacity = computed(() => {
+  if (!chapterDrillAnim.value) return 1
+  return Math.max(0, 1 - chapterDrillAnim.value.t)
+})
+
+const selectedChapterKnowledgePoints = computed(() => {
+  return Array.isArray(selectedChapter.value?.knowledge_points)
+    ? selectedChapter.value.knowledge_points
+    : []
+})
+const selectedChapterCenterLabel = computed(() => graphTextBlock(selectedChapter.value?.title || '', 10, 4, 12, 210))
+
+const chapterGraphNodes = computed(() => {
+  const list = Array.isArray(chapters.value) ? chapters.value : []
+  return list.map((chapter, index) => {
+    const point = radialPoint(index, list.length, GRAPH_RADIUS_X, GRAPH_RADIUS_Y)
+    const knowledgeCount = Array.isArray(chapter.knowledge_points) ? chapter.knowledge_points.length : 0
+    return {
+      ...point,
+      id: chapter.id,
+      title: chapter.title,
+      knowledgeCount,
+      r: Math.max(48, Math.min(68, 48 + knowledgeCount * 2)),
+      raw: chapter,
+      ...graphTextBlock(chapter.title, 8, 4, 11, point.y - 8)
+    }
+  })
+})
+
+const chapterGraphNodesDisplay = computed(() => {
+  const anim = chapterDrillAnim.value
+  const list = chapterGraphNodes.value
+  if (!anim) {
+    return list.map((n) => ({ ...n, groupOpacity: 1, metaOpacity: 1 }))
+  }
+  const { from, chapter, t } = anim
+  return list.map((n) => {
+    const isTarget = String(n.id) === String(chapter.id)
+    if (isTarget) {
+      const x = Math.round(from.x + (GRAPH_CENTER.x - from.x) * t)
+      const y = Math.round(from.y + (GRAPH_CENTER.y - from.y) * t)
+      const r = Math.round(from.r + (GRAPH_CHAPTER_HUB_R - from.r) * t)
+      const tb = graphTextBlock(n.title, 8, 4, 11, y - 8)
+      return {
+        ...n,
+        x,
+        y,
+        r,
+        ...tb,
+        groupOpacity: 1,
+        metaOpacity: Math.max(0, 1 - t * 1.25)
+      }
+    }
+    return {
+      ...n,
+      groupOpacity: Math.max(0, 1 - t * 1.2),
+      metaOpacity: Math.max(0, 1 - t * 1.2)
+    }
+  })
+})
+
+const knowledgePointGraphNodes = computed(() => {
+  const list = selectedChapterKnowledgePoints.value
+  const compact = list.length > 10
+  return list.map((kp, index) => {
+    const point = radialPoint(index, list.length, compact ? 295 : 260, compact ? 155 : 140)
+    return {
+      ...point,
+      id: kp.id,
+      title: kp.title,
+      sectionId: kp.section_id,
+      r: compact ? 42 : 52,
+      raw: kp,
+      ...graphTextBlock(kp.title, compact ? 6 : 8, compact ? 4 : 5, compact ? 9 : 10, point.y)
+    }
+  })
+})
+
 const primaryBtnStyle = { backgroundColor: '#1A365D', color: '#fff' }
+
+function radialPoint(index, total, radiusX = GRAPH_RADIUS_X, radiusY = GRAPH_RADIUS_Y) {
+  if (total <= 0) return { x: GRAPH_CENTER.x, y: GRAPH_CENTER.y }
+  const angle = ((-90 + (360 / total) * index) * Math.PI) / 180
+  return {
+    x: Math.round(GRAPH_CENTER.x + Math.cos(angle) * radiusX),
+    y: Math.round(GRAPH_CENTER.y + Math.sin(angle) * radiusY)
+  }
+}
+
+function graphTextBlock(text, charsPerLine, maxLines, fontSize, centerY) {
+  const s = String(text || '').trim()
+  const lines = []
+  for (let i = 0; i < s.length && lines.length < maxLines; i += charsPerLine) {
+    lines.push(s.slice(i, i + charsPerLine))
+  }
+  const consumed = charsPerLine * maxLines
+  if (s.length > consumed && lines.length) {
+    lines[lines.length - 1] = `${lines[lines.length - 1].slice(0, Math.max(1, charsPerLine - 1))}…`
+  }
+  const lineHeight = Math.round(fontSize * 1.25)
+  return {
+    labelLines: lines.length ? lines : [''],
+    lines: lines.length ? lines : [''],
+    labelY: Math.round(centerY - ((Math.max(1, lines.length) - 1) * lineHeight) / 2 + fontSize / 3),
+    y: Math.round(centerY - ((Math.max(1, lines.length) - 1) * lineHeight) / 2 + fontSize / 3),
+    lineHeight,
+    fontSize
+  }
+}
 
 function isChapterSelected(id) {
   return selectedChapterId.value != null && String(selectedChapterId.value) === String(id)
@@ -470,7 +796,10 @@ function onQuestionTypeQtyChange(type) {
 }
 
 const totalQuestionCount = computed(() => {
-  return Object.values(questionTypeCounts.value).reduce((sum, v) => sum + (Number(v) > 0 ? Number(v) : 0), 0)
+  return Object.values(questionTypeCounts.value).reduce(
+    (sum, v) => sum + (Number(v) > 0 ? Number(v) : 0),
+    0
+  )
 })
 
 function toggleKnowledgePoint(id) {
@@ -530,7 +859,9 @@ const generateDisabled = computed(
     (quizPlan.value.length > 0 && !quizFinished.value)
 )
 
-const clearQuizDisabled = computed(() => !quizSessionActive.value && !quizQuestions.value.some(Boolean))
+const clearQuizDisabled = computed(
+  () => !quizSessionActive.value && !quizQuestions.value.some(Boolean)
+)
 
 const canGoPrevQuiz = computed(
   () => currentQuestionIndex.value > 0 && Boolean(currentQuestion.value.content)
@@ -541,11 +872,8 @@ const canGoNextQuiz = computed(() => {
   const idx = currentQuestionIndex.value
   const next = quizQuestions.value[idx + 1]
   if (idx + 1 >= quizQuestions.value.length) return true
-  // 下一题必须已生成完成（有题干），避免未出完时误点「下一题」
   return Boolean(next && String(next.content || '').trim())
 })
-
-const pointsDisplay = computed(() => userStore.userPoints === null ? '—' : (userStore.userPoints ?? 0))
 const currentUserLabel = computed(() => userStore.username || userStore.userIdLogin || '当前用户')
 
 const canSubmit = computed(() => {
@@ -559,9 +887,60 @@ const canSubmit = computed(() => {
 })
 
 function onSelectChapter(ch) {
-  selectedChapterId.value = ch.id
+  if (String(selectedChapterId.value) === String(ch.id)) return
+  if (chapterDrillRafId != null) {
+    cancelAnimationFrame(chapterDrillRafId)
+    chapterDrillRafId = null
+  }
+
+  const node = chapterGraphNodes.value.find((n) => String(n.id) === String(ch.id))
+  if (!node) {
+    selectedChapterId.value = ch.id
+    selectedKnowledgePointIds.value = []
+    return
+  }
+
+  const from = { x: node.x, y: node.y, r: node.r }
+  const start = performance.now()
+  const duration = 520
+
+  chapterDrillAnim.value = { from, chapter: ch, t: 0 }
+
+  function step(now) {
+    const elapsed = now - start
+    const raw = Math.min(1, elapsed / duration)
+    const eased = easeOutCubic(raw)
+    if (chapterDrillAnim.value) {
+      chapterDrillAnim.value = { ...chapterDrillAnim.value, t: eased }
+    }
+    if (raw < 1) {
+      chapterDrillRafId = requestAnimationFrame(step)
+    } else {
+      chapterDrillRafId = null
+      chapterDrillAnim.value = null
+      selectedChapterId.value = ch.id
+      selectedKnowledgePointIds.value = []
+    }
+  }
+  chapterDrillRafId = requestAnimationFrame(step)
+}
+
+function resetChapterGraph() {
+  if (chapterDrillRafId != null) {
+    cancelAnimationFrame(chapterDrillRafId)
+    chapterDrillRafId = null
+  }
+  chapterDrillAnim.value = null
+  selectedChapterId.value = null
   selectedKnowledgePointIds.value = []
 }
+
+onBeforeUnmount(() => {
+  if (chapterDrillRafId != null) {
+    cancelAnimationFrame(chapterDrillRafId)
+    chapterDrillRafId = null
+  }
+})
 
 async function loadChapters() {
   chaptersLoading.value = true
@@ -621,7 +1000,10 @@ function readQuizHistoryListRaw() {
 
 function writeQuizHistoryListRaw(list) {
   try {
-    localStorage.setItem(getQuizHistoryStorageKey(), JSON.stringify(list.slice(0, QUIZ_HISTORY_MAX)))
+    localStorage.setItem(
+      getQuizHistoryStorageKey(),
+      JSON.stringify(list.slice(0, QUIZ_HISTORY_MAX))
+    )
   } catch (_) {}
 }
 
@@ -645,7 +1027,8 @@ function appendQuizHistory() {
   const snapshot = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
     savedAt: new Date().toISOString(),
-    chapterTitle: ch?.title || (selectedChapterId.value != null ? `第${selectedChapterId.value}章` : ''),
+    chapterTitle:
+      ch?.title || (selectedChapterId.value != null ? `第${selectedChapterId.value}章` : ''),
     chapterId: selectedChapterId.value,
     questionTypeCounts: JSON.parse(JSON.stringify(questionTypeCounts.value)),
     selectedKnowledgePointIds: [...selectedKnowledgePointIds.value],
@@ -661,14 +1044,6 @@ function appendQuizHistory() {
   list.unshift(snapshot)
   writeQuizHistoryListRaw(list)
   quizHistoryList.value = readQuizHistoryListRaw()
-}
-
-async function loadPoints() {
-  if (!userStore.isLoggedIn) return
-  try {
-    const res = await getPoints()
-    userStore.setUserPoints(res.points ?? 0)
-  } catch (_) {}
 }
 
 function getQuizStorageKey() {
@@ -758,17 +1133,26 @@ watch(userAnswer, (v) => {
  * @param options.forceQuizFinished 若传入则覆盖快照中的 quizFinished（历史「打开」时传 false 以进入做题区浏览）
  */
 function hydrateQuizFromSaved(saved, options = {}) {
-  if (!saved?.quizQuestions || !Array.isArray(saved.quizQuestions) || saved.quizQuestions.length === 0) return false
+  if (
+    !saved?.quizQuestions ||
+    !Array.isArray(saved.quizQuestions) ||
+    saved.quizQuestions.length === 0
+  )
+    return false
 
   selectedChapterId.value = saved.chapterId ?? null
   questionTypeCounts.value = { ...DEFAULT_TYPE_COUNTS(), ...(saved.questionTypeCounts || {}) }
-  selectedKnowledgePointIds.value = Array.isArray(saved.selectedKnowledgePointIds) ? saved.selectedKnowledgePointIds : []
+  selectedKnowledgePointIds.value = Array.isArray(saved.selectedKnowledgePointIds)
+    ? saved.selectedKnowledgePointIds
+    : []
 
   quizQuestions.value = saved.quizQuestions
   quizSubmissions.value = Array.isArray(saved.quizSubmissions) ? saved.quizSubmissions : []
   currentQuestionIndex.value = Number(saved.currentQuestionIndex ?? 0)
   quizFinished.value =
-    options.forceQuizFinished !== undefined ? options.forceQuizFinished : Boolean(saved.quizFinished)
+    options.forceQuizFinished !== undefined
+      ? options.forceQuizFinished
+      : Boolean(saved.quizFinished)
 
   const n = quizQuestions.value.length
   if (Array.isArray(saved.quizPlan) && saved.quizPlan.length === n) {
@@ -959,7 +1343,9 @@ async function doGenerate() {
 async function doSubmit() {
   if (!canSubmit.value || !currentQuestion.value.content) return
   submitting.value = true
-  const knowledgePoint = currentQuestion.value.knowledge_point ? String(currentQuestion.value.knowledge_point) : ''
+  const knowledgePoint = currentQuestion.value.knowledge_point
+    ? String(currentQuestion.value.knowledge_point)
+    : ''
   let answerToSend = String(userAnswer.value).trim()
   if (currentQuestion.value.question_type === 'choice') {
     answerToSend = answerToSend.toUpperCase().charAt(0)
@@ -969,10 +1355,12 @@ async function doSubmit() {
   }
   let questionContent = currentQuestion.value.content
   if (
-    (currentQuestion.value.question_type === 'choice' || currentQuestion.value.question_type === 'multi_choice') &&
+    (currentQuestion.value.question_type === 'choice' ||
+      currentQuestion.value.question_type === 'multi_choice') &&
     currentQuestion.value.options?.length
   ) {
-    questionContent = currentQuestion.value.content + '\n\n' + currentQuestion.value.options.join('\n')
+    questionContent =
+      currentQuestion.value.content + '\n\n' + currentQuestion.value.options.join('\n')
   }
   try {
     const res = await exerciseSubmit({
@@ -982,7 +1370,8 @@ async function doSubmit() {
       correct_answer: currentQuestion.value.correct_answer,
       scoring_points: currentQuestion.value.scoring_points || [],
       user_answer: answerToSend,
-      chapter: currentQuestion.value.chapter != null ? String(currentQuestion.value.chapter) : undefined,
+      chapter:
+        currentQuestion.value.chapter != null ? String(currentQuestion.value.chapter) : undefined,
       section_title: currentQuestion.value.section_title || undefined
     })
     resultCorrect.value = res.is_correct === 1
@@ -994,7 +1383,6 @@ async function doSubmit() {
       explanation: res.explanation || ''
     }
     saveQuizState()
-    await loadPoints()
   } catch (e) {
     console.error(e)
   } finally {
@@ -1114,8 +1502,10 @@ async function loadWrongAnalysis() {
     wrongTotalAttempts.value = totalAttempts != null ? Number(totalAttempts) : null
     wrongTotal.value = totalWrong != null ? Number(totalWrong) : 0
     wrongList.value = Array.isArray(res.items) ? res.items : []
-    wrongApiUserLogin.value = res.user_login != null && res.user_login !== '' ? String(res.user_login).trim() : ''
-    wrongDebugTableTotal.value = res.debug_table_total != null ? Number(res.debug_table_total) : null
+    wrongApiUserLogin.value =
+      res.user_login != null && res.user_login !== '' ? String(res.user_login).trim() : ''
+    wrongDebugTableTotal.value =
+      res.debug_table_total != null ? Number(res.debug_table_total) : null
     console.log('[错题分析] 接口已返回并赋值:', {
       total_attempts: wrongTotalAttempts.value,
       total_wrong: wrongTotal.value,
@@ -1145,7 +1535,8 @@ async function loadWrongList() {
     const res = await exerciseWrongList(wrongPage.value, pageSize)
     wrongList.value = res.items || []
     wrongTotal.value = res.total ?? wrongTotal.value
-    if (res.user_login != null && !wrongApiUserLogin.value) wrongApiUserLogin.value = String(res.user_login).trim()
+    if (res.user_login != null && !wrongApiUserLogin.value)
+      wrongApiUserLogin.value = String(res.user_login).trim()
   } catch (e) {
     wrongListLoadError.value = true
     wrongList.value = []
@@ -1165,10 +1556,21 @@ function drawWrongChart() {
   const chart = echarts.getInstanceByDom(el) || echarts.init(el)
   const data = (wrongStats.value || [])
     .filter((s) => s != null && (s.name != null || s.count != null))
-    .map((s) => ({ name: (s.name && String(s.name).trim()) || '未分类', value: Number(s.count) || 0 }))
+    .map((s) => ({
+      name: (s.name && String(s.name).trim()) || '未分类',
+      value: Number(s.count) || 0
+    }))
     .filter((d) => d.value > 0)
   if (!data.length) {
-    chart.setOption({ title: { text: '暂无错题统计', left: 'center', top: 'center', textStyle: { fontSize: 14, color: '#999' } }, series: [] })
+    chart.setOption({
+      title: {
+        text: '暂无错题统计',
+        left: 'center',
+        top: 'center',
+        textStyle: { fontSize: 14, color: '#999' }
+      },
+      series: []
+    })
     chart.resize()
     return
   }
@@ -1190,37 +1592,21 @@ function drawWrongChart() {
 
 onMounted(async () => {
   await loadChapters()
-  await loadPoints()
   restoreQuizState()
 })
 </script>
 
 <style scoped>
-/* 与课程智能体其他界面一致（VideosView / ConversationView） */
-:root {
-  --primary-color: #1A365D;
-  --secondary-color: #FF7D00;
-  --light-bg: #F7F9FC;
-  --dark-text: #2D3748;
-  --gray-500: #6B7280;
-  --gray-600: #4B5563;
-  --white: #FFFFFF;
-  --gray-200: #E5E7EB;
-  --gray-50: #F9FAFB;
-  --shadow-light: 0 4px 20px rgba(0, 0, 0, 0.05);
-  --shadow-hover: 0 10px 25px rgba(0, 0, 0, 0.1);
-}
-
 .exercises-container {
   font-family: -apple-system, BlinkMacSystemFont, 'Noto Sans SC', 'Roboto', sans-serif;
-  background-color: var(--gray-50);
+  background-color: var(--surface-page);
   min-height: 100vh;
-  color: var(--dark-text);
+  color: var(--text-primary);
 }
 
 .exercises-header {
-  background-color: var(--white);
-  border-bottom: 1px solid var(--gray-200);
+  background-color: var(--surface-panel-2);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .exercises-header-content {
@@ -1241,7 +1627,7 @@ onMounted(async () => {
 
 .exercises-logo-text {
   margin-left: 0;
-  color: var(--primary-color);
+  color: var(--accent-primary);
   font-weight: 600;
   font-size: 16px;
   white-space: nowrap;
@@ -1260,18 +1646,18 @@ onMounted(async () => {
 }
 
 .exercises-nav-link {
-  color: var(--gray-500);
+  color: var(--text-secondary);
   text-decoration: none;
   transition: color 0.3s ease;
   font-size: 16px;
 }
 
 .exercises-nav-link:hover {
-  color: var(--primary-color);
+  color: var(--accent-primary);
 }
 
 .exercises-nav-link.active {
-  color: var(--primary-color);
+  color: var(--accent-primary);
   font-weight: 500;
 }
 
@@ -1281,43 +1667,28 @@ onMounted(async () => {
   gap: 12px;
 }
 
-.exercises-points-link {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-  padding: 6px 12px;
-  border-radius: 6px;
-  background-color: var(--light-bg);
-  color: var(--primary-color);
-  text-decoration: none;
-  font-size: 14px;
-  transition: color 0.2s, background 0.2s;
-}
-
-.exercises-points-num {
-  font-weight: 600;
-}
-
 .exercises-username {
   font-size: 14px;
-  color: var(--gray-600);
+  color: var(--text-secondary);
   margin-right: 4px;
 }
 
 .exercises-auth-btn {
   font-size: 14px;
   padding: 6px 12px;
-  border: 1px solid var(--gray-200);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  background-color: var(--white);
-  color: var(--gray-600);
+  background-color: var(--surface-panel-2);
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: color 0.2s, border-color 0.2s;
+  transition:
+    color 0.2s,
+    border-color 0.2s;
 }
 
 .exercises-auth-btn:hover {
-  color: var(--primary-color);
-  border-color: var(--primary-color);
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
 }
 
 .exercises-main {
@@ -1335,12 +1706,12 @@ onMounted(async () => {
 .exercises-title {
   font-size: 2.5rem;
   font-weight: bold;
-  color: var(--primary-color);
+  color: var(--accent-primary);
   margin-bottom: 16px;
 }
 
 .exercises-subtitle {
-  color: var(--gray-600);
+  color: var(--text-secondary);
   max-width: 600px;
   margin: 0 auto;
 }
@@ -1352,7 +1723,7 @@ onMounted(async () => {
 .exercises-section-title {
   font-size: 20px;
   font-weight: 600;
-  color: var(--primary-color);
+  color: var(--accent-primary);
   margin-bottom: 12px;
 }
 
@@ -1366,15 +1737,15 @@ onMounted(async () => {
   flex: 1;
   min-width: 160px;
   padding: 12px 14px;
-  border: 1px solid var(--gray-200);
+  border: 1px solid var(--border-subtle);
   border-radius: 12px;
-  background-color: var(--white);
+  background-color: var(--surface-panel-2);
   transition: all 0.25s ease;
 }
 
 .exercises-type-option--selected {
-  background-color: var(--primary-color);
-  border-color: var(--primary-color);
+  background-color: var(--accent-soft);
+  border-color: var(--border-accent);
 }
 
 .exercises-type-option-check {
@@ -1387,43 +1758,44 @@ onMounted(async () => {
 
 .exercises-type-option-label {
   font-size: 14px;
-  color: var(--gray-600);
+  color: var(--text-secondary);
 }
 
 .exercises-type-option--selected .exercises-type-option-label {
-  color: var(--white);
+  color: var(--accent-primary);
+  font-weight: 560;
 }
 
 .exercises-type-option--selected input[type='checkbox'] {
-  accent-color: #fff;
+  accent-color: var(--accent-primary);
 }
 
 .exercises-type-qty-input {
   width: 100%;
   padding: 8px 10px;
   border-radius: 8px;
-  border: 1px solid var(--gray-200);
+  border: 1px solid var(--border-subtle);
   font-size: 14px;
   box-sizing: border-box;
-  background: var(--white);
-  color: var(--gray-600);
+  background: var(--surface-panel-2);
+  color: var(--text-secondary);
 }
 
 .exercises-type-option--selected .exercises-type-qty-input {
-  border-color: rgba(255, 255, 255, 0.35);
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--white);
+  border-color: var(--border-accent);
+  background: var(--surface-panel-2);
+  color: var(--accent-primary);
 }
 
 .exercises-chapters-loading {
-  color: var(--gray-500);
+  color: var(--text-secondary);
   font-size: 14px;
   padding: 16px 0;
   margin-bottom: 20px;
 }
 
 .exercises-chapters-error {
-  color: var(--gray-600);
+  color: var(--text-secondary);
   font-size: 14px;
   padding: 16px 0;
   margin-bottom: 20px;
@@ -1432,47 +1804,217 @@ onMounted(async () => {
 .exercises-retry-btn {
   margin-left: 12px;
   padding: 4px 12px;
-  border: 1px solid var(--primary-color);
+  border: 1px solid var(--accent-primary);
   border-radius: 6px;
   background: transparent;
-  color: var(--primary-color);
+  color: var(--accent-primary);
   font-size: 13px;
   cursor: pointer;
 }
 
 .exercises-retry-btn:hover {
-  background: var(--light-bg);
+  background: var(--surface-page-alt);
 }
 
-.exercises-knowledge-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
+.exercises-graph-card {
   margin-bottom: 20px;
+  padding: 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(31, 95, 153, 0.1), transparent 32%),
+    linear-gradient(180deg, var(--surface-panel-2), var(--surface-page-alt));
+  box-shadow: 0 1px 0 var(--border-subtle);
+  overflow: hidden;
 }
 
-.exercises-knowledge-btn {
-  padding: 8px 16px;
-  border: 1px solid var(--gray-200);
-  border-radius: 20px;
-  background-color: var(--white);
-  color: var(--gray-600);
-  font-size: 14px;
-  text-align: left;
+.exercises-graph-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.exercises-graph-kicker {
+  margin: 0 0 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.exercises-graph-title {
+  margin: 0;
+  color: var(--accent-primary);
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.exercises-graph-reset-btn {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface-panel-2);
+  color: var(--text-secondary);
+  font-size: 13px;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease,
+    background-color 0.2s ease;
 }
 
-.exercises-knowledge-btn:hover {
-  border-color: var(--primary-color);
-  color: var(--primary-color);
+.exercises-graph-reset-btn:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  background: var(--surface-page-alt);
 }
 
-.exercises-select-section .exercises-knowledge-btn.exercises-knowledge-btn--selected,
-.exercises-select-section .exercises-knowledge-btn[data-selected='true'] {
-  background-color: var(--primary-color);
-  color: var(--white);
-  border-color: var(--primary-color);
+.exercises-graph-stage {
+  position: relative;
+  min-height: 420px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  background:
+    linear-gradient(rgba(31, 95, 153, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(31, 95, 153, 0.045) 1px, transparent 1px),
+    var(--surface-panel-2);
+  background-size: 28px 28px;
+}
+
+/* 飞入结束后，知识点层淡入 */
+.exercises-graph-kp-enter-active {
+  transition: opacity 0.38s ease-out;
+}
+
+.exercises-graph-kp-enter-from {
+  opacity: 0;
+}
+
+.exercises-graph-kp-leave-active {
+  transition: opacity 0.2s ease-in;
+}
+
+.exercises-graph-kp-leave-to {
+  opacity: 0;
+}
+
+.exercises-knowledge-graph {
+  display: block;
+  width: 100%;
+  height: 420px;
+}
+
+.exercises-graph-edge {
+  pointer-events: none;
+  stroke: rgba(31, 95, 153, 0.22);
+  stroke-width: 1.4;
+  transition:
+    stroke 0.2s ease,
+    stroke-width 0.2s ease;
+}
+
+.exercises-graph-edge.is-selected {
+  stroke: var(--accent-primary);
+  stroke-width: 2.4;
+}
+
+.exercises-graph-hub circle,
+.exercises-graph-center-node circle {
+  fill: var(--accent-primary);
+  stroke: rgba(255, 255, 255, 0.72);
+  stroke-width: 2;
+  filter: drop-shadow(0 10px 18px rgba(31, 95, 153, 0.24));
+}
+
+.exercises-graph-hub text,
+.exercises-graph-center-node text {
+  fill: #fff;
+  font-size: 15px;
+  font-weight: 650;
+  pointer-events: none;
+}
+
+.exercises-graph-node {
+  cursor: pointer;
+  outline: none;
+}
+
+.exercises-graph-node.is-drill-muted {
+  pointer-events: none;
+}
+
+.exercises-graph-node circle {
+  fill: var(--surface-panel-2);
+  stroke: var(--border-subtle);
+  stroke-width: 1.5;
+  filter: drop-shadow(0 8px 16px rgba(15, 23, 42, 0.1));
+  transition:
+    fill 0.2s ease,
+    stroke 0.2s ease,
+    stroke-width 0.2s ease,
+    filter 0.2s ease;
+}
+
+.exercises-graph-node text {
+  fill: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 560;
+  pointer-events: none;
+}
+
+.exercises-graph-node-meta {
+  font-size: 11px;
+  opacity: 0.78;
+}
+
+/* hover 使用不透明显色；避免 --accent-soft 过透明导致透出下层连线 */
+.exercises-graph-node:hover circle,
+.exercises-graph-node:focus-visible circle {
+  fill: var(--surface-panel-2);
+  fill: color-mix(in srgb, var(--accent-primary) 16%, var(--surface-panel-2));
+  stroke: var(--accent-primary);
+  stroke-width: 2;
+  filter: drop-shadow(0 10px 20px rgba(31, 95, 153, 0.2));
+}
+
+.exercises-graph-node:hover text,
+.exercises-graph-node:focus-visible text {
+  fill: var(--accent-primary);
+}
+
+.exercises-graph-node.is-selected circle {
+  fill: var(--accent-primary);
+  stroke: var(--border-accent);
+  stroke-width: 2.5;
+}
+
+.exercises-graph-node.is-selected text {
+  fill: #fff;
+}
+
+.exercises-graph-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.exercises-graph-empty {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .exercises-generate-row {
@@ -1498,15 +2040,15 @@ onMounted(async () => {
   padding: 10px 24px;
   border: none;
   border-radius: 8px;
-  background-color: var(--primary-color);
-  color: var(--white);
+  background-color: var(--accent-primary);
+  color: var(--surface-panel-2);
   font-size: 15px;
   cursor: pointer;
   transition: background-color 0.3s ease;
 }
 
 .exercises-generate-btn:hover:not(:disabled) {
-  background-color: #153e68;
+  background-color: var(--accent-primary-hover);
 }
 
 .exercises-generate-btn:disabled {
@@ -1516,20 +2058,23 @@ onMounted(async () => {
 
 .exercises-history-btn {
   padding: 10px 18px;
-  border: 1px solid var(--gray-200);
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
-  background-color: var(--white);
-  color: var(--gray-600);
+  background-color: var(--surface-panel-2);
+  color: var(--text-secondary);
   font-size: 15px;
   cursor: pointer;
-  transition: color 0.2s, border-color 0.2s, background-color 0.2s;
+  transition:
+    color 0.2s,
+    border-color 0.2s,
+    background-color 0.2s;
   white-space: nowrap;
 }
 
 .exercises-history-btn:hover {
-  color: var(--primary-color);
-  border-color: var(--primary-color);
-  background-color: var(--light-bg);
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+  background-color: var(--surface-page-alt);
 }
 
 .exercises-clear-quiz-btn {
@@ -1537,10 +2082,12 @@ onMounted(async () => {
   border: 1px solid var(--color-error-500);
   border-radius: 8px;
   background-color: var(--color-error-500);
-  color: var(--white);
+  color: var(--surface-panel-2);
   font-size: 15px;
   cursor: pointer;
-  transition: background-color 0.2s, border-color 0.2s;
+  transition:
+    background-color 0.2s,
+    border-color 0.2s;
   white-space: nowrap;
 }
 
@@ -1555,7 +2102,7 @@ onMounted(async () => {
 }
 
 .exercises-history-empty {
-  color: var(--gray-500);
+  color: var(--text-secondary);
   font-size: 14px;
   padding: 12px 0;
 }
@@ -1572,7 +2119,7 @@ onMounted(async () => {
   justify-content: space-between;
   gap: 12px;
   padding: 12px 0;
-  border-bottom: 1px solid var(--gray-200);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .exercises-history-item:last-child {
@@ -1588,33 +2135,35 @@ onMounted(async () => {
 
 .exercises-history-item-title {
   font-size: 14px;
-  color: var(--dark-text);
+  color: var(--text-primary);
 }
 
 .exercises-history-item-time {
   font-size: 12px;
-  color: var(--gray-500);
+  color: var(--text-secondary);
 }
 
 .exercises-history-open-btn {
   flex-shrink: 0;
   padding: 6px 14px;
-  border: 1px solid var(--primary-color);
+  border: 1px solid var(--accent-primary);
   border-radius: 8px;
   background: transparent;
-  color: var(--primary-color);
+  color: var(--accent-primary);
   font-size: 13px;
   cursor: pointer;
-  transition: background-color 0.2s, color 0.2s;
+  transition:
+    background-color 0.2s,
+    color 0.2s;
 }
 
 .exercises-history-open-btn:hover {
-  background-color: var(--light-bg);
+  background-color: var(--surface-page-alt);
 }
 
 .exercises-quiz-limit-hint {
   margin-top: 6px;
-  color: var(--gray-500);
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
@@ -1623,10 +2172,10 @@ onMounted(async () => {
 }
 
 .exercises-question-card {
-  background-color: var(--white);
+  background-color: var(--surface-panel-2);
   border-radius: 12px;
   padding: 24px;
-  box-shadow: var(--shadow-light);
+  box-shadow: 0 10px 28px var(--shadow-1);
   transition: all 0.3s ease;
 }
 
@@ -1639,27 +2188,27 @@ onMounted(async () => {
 
 .exercises-textbook-badge {
   font-size: 13px;
-  color: var(--gray-500);
+  color: var(--text-secondary);
   margin: 0;
   padding: 6px 10px;
-  background-color: var(--gray-50);
+  background-color: var(--surface-page);
   border-radius: 6px;
-  border-left: 3px solid #1A365D;
+  border-left: 3px solid var(--accent-primary);
   flex: 1;
 }
 
 .exercises-detail-btn {
   padding: 4px 12px;
   font-size: 13px;
-  border: 1px solid #1A365D;
+  border: 1px solid var(--accent-primary);
   border-radius: 6px;
   background: transparent;
-  color: #1A365D;
+  color: var(--accent-primary);
   cursor: pointer;
 }
 
 .exercises-detail-btn:hover {
-  background-color: var(--gray-50);
+  background-color: var(--surface-page);
 }
 
 .exercises-textbook-detail {
@@ -1671,7 +2220,7 @@ onMounted(async () => {
 
 .exercises-textbook-detail-meta {
   font-size: 13px;
-  color: var(--gray-500);
+  color: var(--text-secondary);
   margin: 0 0 12px 0;
 }
 
@@ -1680,11 +2229,11 @@ onMounted(async () => {
   overflow-y: auto;
   font-size: 14px;
   line-height: 1.7;
-  color: var(--dark-text);
+  color: var(--text-primary);
   padding: 12px;
-  background-color: var(--gray-50);
+  background-color: var(--surface-page);
   border-radius: 8px;
-  border: 1px solid var(--gray-200);
+  border: 1px solid var(--border-subtle);
 }
 
 .exercises-textbook-detail-markdown h1,
@@ -1692,7 +2241,7 @@ onMounted(async () => {
 .exercises-textbook-detail-markdown h3 {
   font-size: 15px;
   font-weight: 600;
-  color: var(--dark-text);
+  color: var(--text-primary);
   margin: 12px 0 6px 0;
 }
 .exercises-textbook-detail-markdown h1:first-child,
@@ -1702,7 +2251,7 @@ onMounted(async () => {
 }
 .exercises-textbook-detail-markdown strong {
   font-weight: 600;
-  color: var(--dark-text);
+  color: var(--text-primary);
 }
 .exercises-textbook-detail-markdown p {
   margin: 0 0 8px 0;
@@ -1720,7 +2269,7 @@ onMounted(async () => {
   line-height: 1.7;
   margin: 0;
   white-space: pre-wrap;
-  color: var(--dark-text);
+  color: var(--text-primary);
 }
 
 .exercises-options {
@@ -1748,35 +2297,35 @@ onMounted(async () => {
   flex: 1;
   font-size: 14px;
   line-height: 1.5;
-  color: var(--dark-text);
+  color: var(--text-primary);
   cursor: pointer;
 }
 
 .exercises-answer-hint {
   font-size: 14px;
-  color: var(--gray-500);
+  color: var(--text-secondary);
   margin: 0 0 12px 0;
 }
 
 .exercises-result-explanation-block {
   margin-top: 12px;
   padding: 12px;
-  background-color: var(--gray-50);
+  background-color: var(--surface-page);
   border-radius: 8px;
-  border: 1px solid var(--gray-200);
+  border: 1px solid var(--border-subtle);
 }
 
 .exercises-result-explanation-title {
   font-size: 14px;
   font-weight: 600;
-  color: var(--primary-color);
+  color: var(--accent-primary);
   margin: 0 0 8px 0;
 }
 
 .exercises-answer-area textarea {
   width: 100%;
   padding: 12px;
-  border: 1px solid var(--gray-200);
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
   font-size: 14px;
   resize: vertical;
@@ -1788,8 +2337,8 @@ onMounted(async () => {
   padding: 8px 20px;
   border: none;
   border-radius: 8px;
-  background-color: var(--primary-color);
-  color: var(--white);
+  background-color: var(--accent-primary);
+  color: var(--surface-panel-2);
   font-size: 14px;
   cursor: pointer;
   transition: background-color 0.3s ease;
@@ -1830,14 +2379,14 @@ onMounted(async () => {
 .exercises-result-answer,
 .exercises-result-explanation {
   font-size: 14px;
-  color: var(--gray-600);
+  color: var(--text-secondary);
   margin: 4px 0;
   line-height: 1.5;
 }
 
 .exercises-result-explanation-markdown strong {
   font-weight: 600;
-  color: var(--dark-text);
+  color: var(--text-primary);
 }
 .exercises-result-explanation-markdown p {
   margin: 0 0 6px 0;
@@ -1854,24 +2403,26 @@ onMounted(async () => {
 .exercises-next-btn {
   margin-top: 16px;
   padding: 8px 20px;
-  border: 1px solid var(--primary-color);
+  border: 1px solid var(--accent-primary);
   border-radius: 8px;
   background: transparent;
-  color: var(--primary-color);
+  color: var(--accent-primary);
   font-size: 14px;
   cursor: pointer;
-  transition: background-color 0.2s, color 0.2s;
+  transition:
+    background-color 0.2s,
+    color 0.2s;
 }
 
 .exercises-next-btn:hover:not(:disabled) {
-  background-color: var(--light-bg);
+  background-color: var(--surface-page-alt);
 }
 
 .exercises-next-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-  border-color: var(--gray-200);
-  color: var(--gray-500);
+  border-color: var(--border-subtle);
+  color: var(--text-secondary);
   pointer-events: none;
 }
 
@@ -1888,19 +2439,22 @@ onMounted(async () => {
 
 .exercises-prev-btn {
   padding: 8px 20px;
-  border: 1px solid var(--gray-200);
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
   background: transparent;
-  color: var(--gray-600);
+  color: var(--text-secondary);
   font-size: 14px;
   cursor: pointer;
-  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+  transition:
+    background-color 0.2s,
+    color 0.2s,
+    border-color 0.2s;
 }
 
 .exercises-prev-btn:hover:not(:disabled) {
-  border-color: var(--primary-color);
-  color: var(--primary-color);
-  background-color: var(--light-bg);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  background-color: var(--surface-page-alt);
 }
 
 .exercises-prev-btn:disabled {
@@ -1910,7 +2464,7 @@ onMounted(async () => {
 
 .exercises-empty-hint {
   text-align: center;
-  color: var(--gray-500);
+  color: var(--text-secondary);
   font-size: 14px;
   padding: 40px 0;
 }
@@ -1923,7 +2477,7 @@ onMounted(async () => {
 .wrong-debug-line {
   margin: 0 0 12px 0;
   font-size: 13px;
-  color: var(--gray-500);
+  color: var(--text-secondary);
 }
 
 .wrong-debug-line .wrong-debug-error {
@@ -1932,7 +2486,7 @@ onMounted(async () => {
 
 .wrong-refresh-btn {
   margin-left: 12px;
-  color: var(--primary-color);
+  color: var(--accent-primary);
   font-size: 13px;
 }
 
@@ -1941,7 +2495,7 @@ onMounted(async () => {
 }
 
 .wrong-refresh-btn.loading {
-  color: var(--gray-500);
+  color: var(--text-secondary);
   cursor: not-allowed;
 }
 
@@ -1952,12 +2506,12 @@ onMounted(async () => {
 
 .wrong-list h4 {
   font-size: 14px;
-  color: var(--dark-text);
+  color: var(--text-primary);
   margin: 0 0 12px 0;
 }
 
 .wrong-list-empty {
-  color: var(--gray-500);
+  color: var(--text-secondary);
   font-size: 14px;
   padding: 16px 0;
 }
@@ -1971,30 +2525,30 @@ onMounted(async () => {
 
 .wrong-list-item {
   padding: 12px 0;
-  border-bottom: 1px solid var(--gray-200);
+  border-bottom: 1px solid var(--border-subtle);
   font-size: 13px;
 }
 
 .wrong-item-question {
   margin: 0 0 6px 0;
-  color: var(--dark-text);
+  color: var(--text-primary);
   line-height: 1.5;
 }
 
 .wrong-item-meta {
   margin: 0 0 4px 0;
-  color: var(--gray-500);
+  color: var(--text-secondary);
 }
 
 .wrong-item-correct {
   margin: 0 0 4px 0;
-  color: var(--primary-color, #1A365D);
+  color: var(--primary-color, #1a365d);
   font-size: 13px;
 }
 
 .wrong-item-explanation {
   margin: 0;
-  color: var(--gray-600);
+  color: var(--text-secondary);
   line-height: 1.4;
 }
 
@@ -2019,7 +2573,7 @@ onMounted(async () => {
   padding-left: 20px;
 }
 .wrong-item-markdown code {
-  background: var(--gray-200);
+  background: var(--border-subtle);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 0.9em;
@@ -2027,7 +2581,7 @@ onMounted(async () => {
 .wrong-item-markdown pre {
   margin: 6px 0;
   padding: 10px;
-  background: var(--gray-200);
+  background: var(--border-subtle);
   border-radius: 6px;
   overflow-x: auto;
 }
@@ -2060,6 +2614,21 @@ onMounted(async () => {
   }
   .exercises-main {
     padding: 24px 16px;
+  }
+  .exercises-graph-header {
+    flex-direction: column;
+  }
+  .exercises-graph-stage {
+    min-height: 360px;
+  }
+  .exercises-knowledge-graph {
+    height: 360px;
+  }
+  .exercises-graph-node text {
+    font-size: 11px;
+  }
+  .exercises-graph-summary {
+    flex-direction: column;
   }
 }
 </style>

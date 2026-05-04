@@ -71,6 +71,7 @@ class RequestRecord:
     status_code: int | None
     seconds: float
     error: str | None = None
+    ttft_seconds: float | None = None
 
 
 @dataclass
@@ -86,6 +87,7 @@ class ScenarioStats:
         oks = [r for r in self.records if r.ok]
         fails = [r for r in self.records if not r.ok]
         lat = [r.seconds for r in oks]
+        ttft = [r.ttft_seconds for r in oks if r.ttft_seconds is not None]
         lines = [
             f"\n=== {self.name} ===",
             f"  请求数: {n}  成功: {len(oks)}  失败: {len(fails)}",
@@ -97,6 +99,12 @@ class ScenarioStats:
             )
             lines.append(
                 f"  p50={_percentile(lat, 50):.3f}  p95={_percentile(lat, 95):.3f}  p99={_percentile(lat, 99):.3f}"
+            )
+        if ttft:
+            lines.append(
+                f"  首 token 时间TTFT(s): min={min(ttft):.3f}  max={max(ttft):.3f}  "
+                f"mean={statistics.mean(ttft):.3f}  p50={_percentile(ttft, 50):.3f}  "
+                f"p95={_percentile(ttft, 95):.3f}  p99={_percentile(ttft, 99):.3f}"
             )
         if fails:
             err_sample = {}
@@ -181,15 +189,10 @@ async def run_video_summary(
             r = await client.get(f"/api/course/videos/{video_id}/summary")
             dt = time.perf_counter() - t0
             ok = r.status_code == 200
-            stats.add(
-                RequestRecord(
-                    "video_summary",
-                    ok,
-                    r.status_code,
-                    dt,
-                    None if ok else (None if r.status_code == 404 else r.text[:120]),
-                )
-            )
+            err = None
+            if not ok:
+                err = "404 无总结文件" if r.status_code == 404 else r.text[:120]
+            stats.add(RequestRecord("video_summary", ok, r.status_code, dt, err))
         except Exception as e:
             dt = time.perf_counter() - t0
             stats.add(RequestRecord("video_summary", False, None, dt, str(e)))
@@ -251,12 +254,16 @@ async def run_course_chat_stream_head(
                     )
                     return
                 n = 0
+                first_chunk_at: float | None = None
                 async for chunk in r.aiter_bytes():
+                    if first_chunk_at is None and chunk:
+                        first_chunk_at = time.perf_counter()
                     n += len(chunk)
                     if n >= max_bytes:
                         break
                 dt = time.perf_counter() - t0
-                stats.add(RequestRecord("course_chat_stream", True, status, dt, None))
+                ttft_seconds = None if first_chunk_at is None else first_chunk_at - t0
+                stats.add(RequestRecord("course_chat_stream", True, status, dt, None, ttft_seconds))
         except Exception as e:
             dt = time.perf_counter() - t0
             stats.add(RequestRecord("course_chat_stream", False, None, dt, str(e)))

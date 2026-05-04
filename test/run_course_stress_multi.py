@@ -19,6 +19,9 @@ Docker::
 
 若 API 报 QueuePool 连接超时：流式对话会长时间占满 DB 连接，请调大 .env 中 POSTGRES_POOL_SIZE /
 POSTGRES_MAX_OVERFLOW（见 docs/latest/advanced/configuration.md），或降低每进程的 --llm-concurrency。
+
+登录限流：服务端对 POST /api/auth/token 按 IP 约 10 次/分钟（见 server/main.py）。
+同一来源并发登录超过该值会 429，故默认 --max-parallel=8；账号很多时可分批跑或调大间隔。
 """
 
 from __future__ import annotations
@@ -66,6 +69,7 @@ async def _run_child(
     child_argv: list[str],
     llm_only: bool,
     base_url: str | None,
+    slot: asyncio.Semaphore,
 ) -> tuple[int, str]:
     env = os.environ.copy()
     env["TEST_USERNAME"] = login
@@ -78,13 +82,14 @@ async def _run_child(
         cmd.append("--llm-only")
     cmd.extend(child_argv)
 
-    print(f"[编排] 启动 {label!r} (login_id={login!r})", flush=True)
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        cwd=str(_ROOT),
-        env=env,
-    )
-    code = await proc.wait()
+    async with slot:
+        print(f"[编排] 启动 {label!r} (login_id={login!r})", flush=True)
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(_ROOT),
+            env=env,
+        )
+        code = await proc.wait()
     status = "ok" if code == 0 else f"exit {code}"
     print(f"[编排] 结束 {label!r} -> {status}", flush=True)
     return code, label
@@ -113,7 +118,17 @@ async def amain() -> None:
         default=None,
         help="覆盖子进程环境变量 TEST_BASE_URL（不设则继承当前环境）",
     )
+    parser.add_argument(
+        "--max-parallel",
+        type=int,
+        default=8,
+        metavar="N",
+        help="同时运行的子进程上限（避免触达 /api/auth/token 每 IP 登录限流，默认 8）",
+    )
     args = parser.parse_args(own_argv)
+    if args.max_parallel < 1:
+        print("错误: --max-parallel 须 >= 1")
+        raise SystemExit(2)
 
     path = args.accounts_file
     if not path.is_file():
@@ -129,8 +144,9 @@ async def amain() -> None:
         raise SystemExit(2)
 
     llm_only = not args.full
+    slot = asyncio.Semaphore(args.max_parallel)
     tasks = [
-        _run_child(login, pw, label, child_argv, llm_only, args.base_url)
+        _run_child(login, pw, label, child_argv, llm_only, args.base_url, slot)
         for login, pw, label in accounts
     ]
     results = await asyncio.gather(*tasks)

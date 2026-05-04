@@ -1,0 +1,49 @@
+{
+  "segments": [
+    {
+      "start_sec": 0,
+      "end_sec": 75,
+      "title": "链路成本变化对DV算法的影响问题。"
+    },
+    {
+      "start_sec": 75,
+      "end_sec": 207,
+      "title": "讨论DV算法中计算路由表的方法和具体计算过程。"
+    },
+    {
+      "start_sec": 207,
+      "end_sec": 294,
+      "title": "解释通过不同节点到达目标节点的距离计算方法。"
+    },
+    {
+      "start_sec": 294,
+      "end_sec": 361,
+      "title": "分析节点如何根据接收到的信息更新自己的路由表。"
+    },
+    {
+      "start_sec": 361,
+      "end_sec": 430,
+      "title": "发现并解释DV算法中的虚假距离问题及其原因。"
+    },
+    {
+      "start_sec": 430,
+      "end_sec": 443,
+      "title": "讨论DV算法更新信息的速度和环路问题。"
+    },
+    {
+      "start_sec": 443,
+      "end_sec": 465,
+      "title": "提出解决DV算法环路问题的方法。"
+    },
+    {
+      "start_sec": 465,
+      "end_sec": 478,
+      "title": "比较DV算法和LS算法的消息复杂度、收敛速度和鲁棒性。"
+    },
+    {
+      "start_sec": 478,
+      "end_sec": 556,
+      "title": "分析不同网络规模下DV和LS算法的优势和性能问题。"
+    }
+  ]
+}

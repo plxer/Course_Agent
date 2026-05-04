@@ -1,55 +1,30 @@
 <template>
-  <div class="guide-container">
-    <header class="guide-header">
-      <div class="guide-header-content">
-        <router-link to="/" class="guide-logo">
-          <span class="guide-logo-text">天津大学《计算机网络》课程数智化平台</span>
-        </router-link>
-        <div class="guide-right">
-          <div class="guide-nav">
-            <router-link to="/conversation" class="guide-nav-link" :class="{ active: $route.path === '/conversation' || $route.path === '/course' }">对话</router-link>
-            <router-link to="/reading" class="guide-nav-link" :class="{ active: $route.path === '/reading' }">课本伴读</router-link>
-            <router-link to="/videos" class="guide-nav-link" :class="{ active: $route.path === '/videos' }">视频</router-link>
-            <router-link to="/exercises" class="guide-nav-link" :class="{ active: $route.path === '/exercises' }">习题推荐</router-link>
+  <div class="guide-container course-page">
+    <CourseTopbar @logout="handleLogout" @switch-account="handleSwitchAccount" />
 
-            <router-link v-if="userStore.isAdmin" to="/ops" class="guide-nav-link" :class="{ active: $route.path === '/ops' }">运维</router-link>
-            <router-link to="/guide" class="guide-nav-link" :class="{ active: $route.path === '/guide' }">使用指南</router-link>
-          </div>
-          <div class="guide-auth">
-            <template v-if="!userStore.isLoggedIn">
-              <router-link to="/login" class="guide-auth-link">登录</router-link>
-              <router-link to="/register" class="guide-auth-link primary">注册</router-link>
-            </template>
-            <template v-else>
-              <span class="guide-username">{{ userStore.username || userStore.userIdLogin }}</span>
-              <button type="button" class="guide-auth-btn" @click="handleSwitchAccount">切换账号</button>
-              <button type="button" class="guide-auth-btn" @click="handleLogout">退出</button>
-            </template>
-          </div>
-        </div>
-      </div>
-    </header>
-
-    <main class="guide-main">
-      <div class="guide-title-section">
-        <h1 class="guide-title">使用指南</h1>
-        <p class="guide-subtitle">
-          本平台为天津大学《计算机网络》课程数智化学习平台，提供对话答疑、课本伴读、视频学习与习题推荐等功能，帮助您更好地掌握课程内容。
-        </p>
-      </div>
+    <main class="guide-main page-shell">
+      <CoursePageHero
+        eyebrow="Guide"
+        title="使用指南"
+        subtitle="了解平台的核心学习流程、课程功能入口与反馈机制。"
+      />
 
       <!-- 登录与账号 -->
       <section class="guide-section">
         <h2 class="guide-section-title">登录与账号</h2>
         <div class="guide-section-content">
-          <p class="guide-section-p">使用前请先注册并登录。登录后可在页面右上角看到用户名、积分（若当前页面有显示）、切换账号与退出按钮。切换账号可更换为其他账号登录，退出则清除当前登录状态。</p>
+          <p class="guide-section-p">
+            使用前请先注册并登录。登录后可在页面右上角看到用户名、切换账号与退出按钮。切换账号可更换为其他账号登录，退出则清除当前登录状态。
+          </p>
           <div class="guide-actions">
             <template v-if="!userStore.isLoggedIn">
               <button class="guide-action-btn primary" @click="navigateTo('/login')">登录</button>
               <button class="guide-action-btn" @click="navigateTo('/register')">注册新账号</button>
             </template>
             <template v-else>
-              <span class="guide-status-text">当前已登录: {{ userStore.username || userStore.userIdLogin }}</span>
+              <span class="guide-status-text"
+                >当前已登录: {{ userStore.username || userStore.userIdLogin }}</span
+              >
               <button class="guide-action-btn" @click="handleSwitchAccount">切换账号</button>
               <button class="guide-action-btn" @click="handleLogout">退出登录</button>
             </template>
@@ -67,7 +42,9 @@
             智能对话
             <button class="guide-goto-btn" @click="navigateTo('/conversation')">进入</button>
           </h3>
-          <p class="guide-detail-desc">在顶部导航点击「对话」进入课程智能体。您可以像与助教聊天一样提问，智能体会基于课程教材与知识库回答。支持多轮对话，可新建多个对话分别讨论不同主题。开启智能体功能后，回答中会标注参考来源，方便您回溯课本。</p>
+          <p class="guide-detail-desc">
+            在顶部导航点击「对话」进入课程智能体。您可以像与助教聊天一样提问，智能体会基于课程教材与知识库回答。支持多轮对话，可新建多个对话分别讨论不同主题。开启智能体功能后，回答中会标注参考来源，方便您回溯课本。
+          </p>
           <ul class="guide-feature-list">
             <li>支持多轮对话，保持上下文连贯</li>
             <li>可创建多个对话，分类讨论不同主题</li>
@@ -82,7 +59,9 @@
             课本伴读
             <button class="guide-goto-btn" @click="navigateTo('/reading')">进入</button>
           </h3>
-          <p class="guide-detail-desc">「课本伴读」提供与教材对应的智能伴读。选择教材后可按章节阅读，在阅读过程中可随时向智能体提问当前页或相关知识点，便于边读边问、加深理解。</p>
+          <p class="guide-detail-desc">
+            「课本伴读」提供与教材对应的智能伴读。选择教材后可按章节阅读，在阅读过程中可随时向智能体提问当前页或相关知识点，便于边读边问、加深理解。
+          </p>
           <ul class="guide-feature-list">
             <li>支持多本教材切换</li>
             <li>按章节导航，快速定位</li>
@@ -97,7 +76,9 @@
             视频学习
             <button class="guide-goto-btn" @click="navigateTo('/videos')">进入</button>
           </h3>
-          <p class="guide-detail-desc">「视频」页面按课程章节组织视频资源。选择章节后即可观看对应讲解视频，适合配合课本与习题巩固学习。</p>
+          <p class="guide-detail-desc">
+            「视频」页面按课程章节组织视频资源。选择章节后即可观看对应讲解视频，适合配合课本与习题巩固学习。
+          </p>
           <ul class="guide-feature-list">
             <li>按章节分类整理视频</li>
             <li>支持视频播放和进度控制</li>
@@ -111,12 +92,13 @@
             习题推荐
             <button class="guide-goto-btn" @click="navigateTo('/exercises')">进入</button>
           </h3>
-          <p class="guide-detail-desc">「习题推荐」根据您的学习情况推荐练习题。支持错题分析，帮助您针对薄弱知识点加强练习。</p>
+          <p class="guide-detail-desc">
+            「习题推荐」根据您的学习情况推荐练习题。支持错题分析，帮助您针对薄弱知识点加强练习。
+          </p>
           <ul class="guide-feature-list">
             <li>智能推荐个性化习题</li>
             <li>支持选择题、多选题、简答题等多种题型</li>
-            <li>错题本功能，记录错题便于复习</li>
-            <li>答对获得积分，可兑换称号</li>
+            <li>错题分析，帮助针对薄弱知识点复习</li>
           </ul>
         </div>
 
@@ -126,7 +108,9 @@
             运维管理
             <button class="guide-goto-btn" @click="navigateTo('/ops')">进入</button>
           </h3>
-          <p class="guide-detail-desc">「运维」页面为管理员提供系统监控、用户管理、知识库管理等高级功能。</p>
+          <p class="guide-detail-desc">
+            「运维」页面为管理员提供系统监控、用户管理、知识库管理等高级功能。
+          </p>
           <ul class="guide-feature-list">
             <li>系统运行状态监控</li>
             <li>用户和部门管理</li>
@@ -140,10 +124,17 @@
       <section class="guide-section">
         <h2 class="guide-section-title">
           <span>意见反馈</span>
-          <span v-if="userStore.isAdmin" class="guide-admin-badge" @click="navigateTo('/feedback-admin')">管理反馈</span>
+          <span
+            v-if="userStore.isAdmin"
+            class="guide-admin-badge"
+            @click="navigateTo('/feedback-admin')"
+            >管理反馈</span
+          >
         </h2>
         <div class="guide-feedback-section">
-          <p class="guide-section-p">如果您在使用过程中遇到问题，或有任何建议和意见，欢迎通过下方表单提交反馈。我们将认真对待每一条反馈，持续改进平台体验。</p>
+          <p class="guide-section-p">
+            如果您在使用过程中遇到问题，或有任何建议和意见，欢迎通过下方表单提交反馈。我们将认真对待每一条反馈，持续改进平台体验。
+          </p>
 
           <form class="guide-feedback-form" @submit.prevent="submitFeedback">
             <div class="guide-form-row">
@@ -212,6 +203,8 @@
 <script setup>
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
+import CourseTopbar from '@/components/course/CourseTopbar.vue'
+import CoursePageHero from '@/components/course/CoursePageHero.vue'
 import { useUserStore } from '@/stores/user'
 import { submitFeedback as apiSubmitFeedback } from '@/apis/feedback_api'
 import { message } from 'ant-design-vue'
@@ -283,28 +276,16 @@ async function submitFeedback() {
 </script>
 
 <style lang="less" scoped>
-/* 与课程智能体其他界面一致（ExercisesView / ReadingView / MallView） */
-:root {
-  --primary-color: #1a365d;
-  --light-bg: #f7f9fc;
-  --dark-text: #2d3748;
-  --gray-500: #6b7280;
-  --gray-600: #4b5563;
-  --white: #ffffff;
-  --gray-200: #e5e7eb;
-  --gray-50: #f9fafb;
-}
-
 .guide-container {
   font-family: -apple-system, BlinkMacSystemFont, 'Noto Sans SC', 'Roboto', sans-serif;
-  background-color: var(--gray-50);
+  background-color: var(--surface-page);
   min-height: 100vh;
-  color: var(--dark-text);
+  color: var(--text-primary);
 }
 
 .guide-header {
-  background-color: var(--white);
-  border-bottom: 1px solid var(--gray-200);
+  background-color: var(--surface-panel-2);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .guide-header-content {
@@ -325,7 +306,7 @@ async function submitFeedback() {
 
 .guide-logo-text {
   margin-left: 0;
-  color: var(--primary-color);
+  color: var(--accent-primary);
   font-weight: 600;
   font-size: 16px;
   white-space: nowrap;
@@ -344,18 +325,18 @@ async function submitFeedback() {
 }
 
 .guide-nav-link {
-  color: var(--gray-500);
+  color: var(--text-secondary);
   text-decoration: none;
   transition: color 0.3s ease;
   font-size: 16px;
 }
 
 .guide-nav-link:hover {
-  color: var(--primary-color);
+  color: var(--accent-primary);
 }
 
 .guide-nav-link.active {
-  color: var(--primary-color);
+  color: var(--accent-primary);
   font-weight: 500;
 }
 
@@ -367,47 +348,51 @@ async function submitFeedback() {
 
 .guide-username {
   font-size: 14px;
-  color: var(--gray-600);
+  color: var(--text-secondary);
   margin-right: 4px;
 }
 
 .guide-auth-link {
-  color: var(--gray-500);
+  color: var(--text-secondary);
   text-decoration: none;
   font-size: 14px;
   padding: 6px 12px;
   border-radius: 6px;
-  transition: color 0.2s, background 0.2s;
+  transition:
+    color 0.2s,
+    background 0.2s;
 }
 
 .guide-auth-link:hover {
-  color: var(--primary-color);
+  color: var(--accent-primary);
 }
 
 .guide-auth-link.primary {
-  color: var(--white);
-  background-color: var(--primary-color);
+  color: var(--surface-panel-2);
+  background-color: var(--accent-primary);
 }
 
 .guide-auth-link.primary:hover {
-  background-color: #153e68;
-  color: var(--white);
+  background-color: var(--accent-primary-hover);
+  color: var(--surface-panel-2);
 }
 
 .guide-auth-btn {
   font-size: 14px;
   padding: 6px 12px;
-  border: 1px solid var(--gray-200);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  background-color: var(--white);
-  color: var(--gray-600);
+  background-color: var(--surface-panel-2);
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: color 0.2s, border-color 0.2s;
+  transition:
+    color 0.2s,
+    border-color 0.2s;
 }
 
 .guide-auth-btn:hover {
-  color: var(--primary-color);
-  border-color: var(--primary-color);
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
 }
 
 .guide-main {
@@ -423,17 +408,18 @@ async function submitFeedback() {
 }
 
 .guide-title {
-  font-size: 2.5rem;
-  font-weight: bold;
-  color: var(--primary-color);
-  margin-bottom: 16px;
+  font-size: clamp(30px, 3.4vw, 36px);
+  font-weight: 560;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  letter-spacing: 0.01em;
 }
 
 .guide-subtitle {
-  color: var(--gray-600);
+  color: var(--text-secondary);
   max-width: 600px;
   margin: 0 auto;
-  line-height: 1.6;
+  line-height: 1.75;
 }
 
 .guide-section {
@@ -447,7 +433,7 @@ async function submitFeedback() {
 .guide-section-title {
   font-size: 20px;
   font-weight: 600;
-  color: var(--primary-color);
+  color: var(--accent-primary);
   margin-bottom: 12px;
   display: flex;
   align-items: center;
@@ -456,7 +442,7 @@ async function submitFeedback() {
 
 .guide-section-p {
   font-size: 15px;
-  color: var(--gray-600);
+  color: var(--text-secondary);
   line-height: 1.7;
   margin: 0;
 }
@@ -467,11 +453,12 @@ async function submitFeedback() {
 }
 
 .guide-detail-item {
-  background: var(--white);
-  border: 1px solid var(--gray-200);
-  border-radius: 8px;
+  background: var(--surface-panel-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
   padding: 20px;
   margin-bottom: 16px;
+  box-shadow: 0 10px 26px var(--shadow-0);
 }
 
 .guide-detail-item:last-child {
@@ -481,7 +468,7 @@ async function submitFeedback() {
 .guide-detail-title {
   font-size: 16px;
   font-weight: 600;
-  color: var(--dark-text);
+  color: var(--text-primary);
   margin: 0 0 12px 0;
   display: flex;
   align-items: center;
@@ -493,26 +480,25 @@ async function submitFeedback() {
 }
 
 .guide-goto-btn {
-  margin-left: auto;
+  margin-left: 8px;
   font-size: 13px;
-  padding: 4px 12px;
-  border: 1px solid var(--primary-color);
-  border-radius: 4px;
+  padding: 0;
+  border: none;
   background: transparent;
-  color: var(--primary-color);
+  color: var(--accent-primary);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: color 0.2s;
 }
 
 .guide-goto-btn:hover {
-  background: var(--primary-color);
-  color: var(--white);
+  color: var(--accent-primary-hover);
+  text-decoration: underline;
 }
 
 .guide-detail-desc {
   font-size: 14px;
-  color: var(--gray-600);
-  line-height: 1.6;
+  color: var(--text-secondary);
+  line-height: 1.75;
   margin: 0 0 12px 0;
 }
 
@@ -523,8 +509,8 @@ async function submitFeedback() {
 
 .guide-feature-list li {
   font-size: 14px;
-  color: var(--gray-600);
-  line-height: 1.6;
+  color: var(--text-secondary);
+  line-height: 1.75;
   margin-bottom: 6px;
 }
 
@@ -539,29 +525,29 @@ async function submitFeedback() {
   gap: 12px;
   margin-top: 16px;
   padding-top: 16px;
-  border-top: 1px solid var(--gray-200);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .guide-action-btn {
   font-size: 14px;
   padding: 8px 16px;
-  border: 1px solid var(--gray-200);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  background: var(--white);
-  color: var(--gray-600);
+  background: var(--surface-panel-2);
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .guide-action-btn:hover {
-  border-color: var(--primary-color);
-  color: var(--primary-color);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
 }
 
 .guide-action-btn.primary {
-  background: var(--primary-color);
-  border-color: var(--primary-color);
-  color: var(--white);
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: var(--surface-panel-2);
 }
 
 .guide-action-btn.primary:hover {
@@ -570,7 +556,7 @@ async function submitFeedback() {
 
 .guide-status-text {
   font-size: 14px;
-  color: var(--gray-600);
+  color: var(--text-secondary);
   margin-right: 8px;
 }
 
@@ -582,8 +568,8 @@ async function submitFeedback() {
 .guide-admin-badge {
   font-size: 12px;
   padding: 2px 8px;
-  background: var(--primary-color);
-  color: var(--white);
+  background: var(--accent-primary);
+  color: var(--surface-panel-2);
   border-radius: 4px;
   cursor: pointer;
   margin-left: auto;
@@ -596,8 +582,8 @@ async function submitFeedback() {
 
 .guide-feedback-form {
   margin-top: 20px;
-  background: var(--white);
-  border: 1px solid var(--gray-200);
+  background: var(--surface-panel-2);
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
   padding: 20px;
 }
@@ -620,7 +606,7 @@ async function submitFeedback() {
   display: block;
   font-size: 14px;
   font-weight: 500;
-  color: var(--dark-text);
+  color: var(--text-primary);
   margin-bottom: 8px;
 }
 
@@ -633,11 +619,11 @@ async function submitFeedback() {
 .guide-form-textarea {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid var(--gray-200);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   font-size: 14px;
-  color: var(--dark-text);
-  background: var(--white);
+  color: var(--text-primary);
+  background: var(--surface-panel-2);
   transition: border-color 0.2s;
   box-sizing: border-box;
 }
@@ -646,7 +632,7 @@ async function submitFeedback() {
 .guide-form-select:focus,
 .guide-form-textarea:focus {
   outline: none;
-  border-color: var(--primary-color);
+  border-color: var(--accent-primary);
 }
 
 .guide-form-textarea {
@@ -658,7 +644,7 @@ async function submitFeedback() {
 .guide-form-hint {
   display: block;
   font-size: 12px;
-  color: var(--gray-500);
+  color: var(--text-secondary);
   margin-top: 4px;
   text-align: right;
 }
@@ -672,8 +658,8 @@ async function submitFeedback() {
 .guide-submit-btn {
   font-size: 14px;
   padding: 10px 24px;
-  background: var(--primary-color);
-  color: var(--white);
+  background: var(--accent-primary);
+  color: var(--surface-panel-2);
   border: none;
   border-radius: 6px;
   cursor: pointer;
@@ -685,7 +671,7 @@ async function submitFeedback() {
 }
 
 .guide-submit-btn:disabled {
-  background: var(--gray-500);
+  background: var(--text-secondary);
   cursor: not-allowed;
 }
 
@@ -744,9 +730,9 @@ async function submitFeedback() {
   }
 
   .guide-goto-btn {
-    margin-left: 0;
-    margin-top: 8px;
-    width: 100%;
+    margin-left: 8px;
+    margin-top: 0;
+    width: auto;
   }
 }
 </style>

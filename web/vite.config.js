@@ -4,6 +4,9 @@ import vue from '@vitejs/plugin-vue'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  // loadEnv 只读 .env 文件，不含 Docker / shell 注入的变量；compose 的 VITE_API_URL 在 process.env
+  const apiProxyTarget =
+    process.env.VITE_API_URL || env.VITE_API_URL || 'http://127.0.0.1:5050'
   return {
     plugins: [vue()],
     resolve: {
@@ -14,7 +17,7 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: {
         '^/api': {
-          target: env.VITE_API_URL || 'http://api:5050',
+          target: apiProxyTarget,
           changeOrigin: true
         }
       },

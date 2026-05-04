@@ -1,0 +1,74 @@
+{
+  "segments": [
+    {
+      "start_sec": 0,
+      "end_sec": 106,
+      "title": "绪论与Internet基本概念。"
+    },
+    {
+      "start_sec": 109,
+      "end_sec": 203,
+      "title": "Transport Layer 的位置及功能。"
+    },
+    {
+      "start_sec": 210,
+      "end_sec": 298,
+      "title": "TCP 和 UDP 提供的服务。"
+    },
+    {
+      "start_sec": 304,
+      "end_sec": 402,
+      "title": "TCP 提供的可靠数据传输服务。"
+    },
+    {
+      "start_sec": 430,
+      "end_sec": 538,
+      "title": "可靠数据传输的传输模型。"
+    },
+    {
+      "start_sec": 548,
+      "end_sec": 641,
+      "title": "Unreliable Channel 的抽象和协议设计。"
+    },
+    {
+      "start_sec": 666,
+      "end_sec": 1232,
+      "title": "Transport Layer 的数据传输过程。"
+    },
+    {
+      "start_sec": 1258,
+      "end_sec": 1376,
+      "title": "RDT 2.0 协议处理 error 时的潜在问题。"
+    },
+    {
+      "start_sec": 1439,
+      "end_sec": 1595,
+      "title": "RDT 2.1 协议使用 FSM 设计。"
+    },
+    {
+      "start_sec": 1652,
+      "end_sec": 1804,
+      "title": "RDT 2.2 协议使用 ACK 表示 acknowledging 和 negative acknowledging。"
+    },
+    {
+      "start_sec": 1812,
+      "end_sec": 2098,
+      "title": "RDT 2.2 协议中 ACK 和 negative acknowledging 的处理和 FSM 设计。"
+    },
+    {
+      "start_sec": 2303,
+      "end_sec": 2539,
+      "title": "RDT 协议处理丢包和超时重传的 FSM 设计。"
+    },
+    {
+      "start_sec": 2760,
+      "end_sec": 3325,
+      "title": "Stop and Wait 协议性能分析。"
+    },
+    {
+      "start_sec": 3364,
+      "end_sec": 3370,
+      "title": "Stop and Wait 协议的改进方向。"
+    }
+  ]
+}

@@ -570,7 +570,7 @@ const indexParams = ref({
 // 计算属性：是否支持QA分割
 const isQaSplitSupported = computed(() => {
   const type = kbType.value?.toLowerCase()
-  return ['milvus', 'chroma'].includes(type)
+  return type === 'milvus'
 })
 
 const isGraphBased = computed(() => {
@@ -958,11 +958,7 @@ const getAuthHeaders = () => {
 }
 
 const openDocLink = () => {
-  window.open(
-    'https://xerrors.github.io/Yuxi-Know/latest/advanced/document-processing.html',
-    '_blank',
-    'noopener'
-  )
+  window.open('/docs/course-agent.html', '_blank', 'noopener')
 }
 
 const chunkData = async () => {
