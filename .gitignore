@@ -67,3 +67,7 @@ docs/vibe
 .cursorrules
 
 /models
+
+### 课程视频（体积大）：仅跟踪示例第一章，其余 mp4 保留本地不提交；字幕/摘要等 json 照常跟踪
+knowledgebase/videos/*.mp4
+!knowledgebase/videos/Chapter1-Internet.mp4
