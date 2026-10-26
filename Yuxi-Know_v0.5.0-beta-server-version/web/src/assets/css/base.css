@@ -1,0 +1,185 @@
+/* Grok-like monochrome design tokens */
+:root {
+  --main-1000: #050505;
+  --main-900: #111111;
+  --main-800: #1a1a1a;
+  --main-700: #262626;
+  --main-600: #333333;
+  --main-500: #4a4a4a;
+  --main-400: #6b6b6b;
+  --main-300: #8a8a8a;
+  --main-200: #b5b5b5;
+  --main-100: #dedede;
+  --main-50: #f1f1f1;
+  --main-40: #f5f5f5;
+  --main-30: #f7f7f7;
+  --main-20: #fafafa;
+  --main-10: #fcfcfc;
+  --main-5: #fdfdfd;
+  --main-1: #fefefe;
+  --main-0: #ffffff;
+
+  --gray-10000: #000000;
+  --gray-2000: #080808;
+  --gray-1000: #111111;
+  --gray-900: #1a1a1a;
+  --gray-800: #262626;
+  --gray-700: #3a3a3a;
+  --gray-600: #525252;
+  --gray-500: #737373;
+  --gray-400: #a3a3a3;
+  --gray-300: #d4d4d4;
+  --gray-200: #e5e5e5;
+  --gray-150: #eeeeee;
+  --gray-100: #f3f3f3;
+  --gray-50: #f7f7f7;
+  --gray-25: #fafafa;
+  --gray-10: #fcfcfc;
+  --gray-0: #ffffff;
+
+  --color-primary-50: #eef6ff;
+  --color-primary-100: #d9ecff;
+  --color-primary-500: #1f5f99;
+  --color-primary-700: #124a7a;
+  --color-primary-900: #0b3558;
+
+  --main-color: #1f5f99;
+  --main-bright: #2c75b8;
+
+  --color-secondary-50: #f7f7f7;
+  --color-secondary-100: #ededed;
+  --color-secondary-500: #525252;
+  --color-secondary-700: #333333;
+  --color-secondary-900: #171717;
+
+  --color-success-50: #f0fdf4;
+  --color-success-100: #dcfce7;
+  --color-success-500: #16a34a;
+  --color-success-700: #15803d;
+  --color-success-900: #14532d;
+
+  --color-error-50: #fef2f2;
+  --color-error-100: #fee2e2;
+  --color-error-500: #dc2626;
+  --color-error-700: #b91c1c;
+  --color-error-900: #7f1d1d;
+
+  --color-warning-50: #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-500: #d97706;
+  --color-warning-700: #b45309;
+  --color-warning-900: #78350f;
+
+  --color-info-50: #f5f5f5;
+  --color-info-100: #e5e5e5;
+  --color-info-500: #404040;
+  --color-info-700: #262626;
+  --color-info-900: #171717;
+
+  --color-accent-50: #f5f5f5;
+  --color-accent-100: #e5e5e5;
+  --color-accent-500: #171717;
+  --color-accent-700: #0a0a0a;
+  --color-accent-900: #000000;
+
+  --chart-palette-1: #111111;
+  --chart-palette-2: #525252;
+  --chart-palette-3: #8a8a8a;
+  --chart-palette-4: #b5b5b5;
+  --chart-palette-5: #d4d4d4;
+  --chart-palette-6: #3a3a3a;
+  --chart-palette-7: #737373;
+  --chart-palette-8: #a3a3a3;
+  --chart-palette-9: #262626;
+  --chart-palette-10: #e5e5e5;
+
+  --surface-page: #ffffff;
+  --surface-page-alt: #fafafa;
+  --surface-panel: #ffffff;
+  --surface-panel-2: #ffffff;
+  --surface-elevated: #ffffff;
+  --surface-input: #ffffff;
+  --surface-overlay: rgba(255, 255, 255, 0.92);
+
+  --text-primary: #333333;
+  --text-secondary: #666666;
+  --text-muted: #999999;
+  --text-inverse: #ffffff;
+
+  --border-subtle: rgba(31, 95, 153, 0.12);
+  --border-strong: rgba(31, 95, 153, 0.24);
+  --border-accent: rgba(31, 95, 153, 0.42);
+
+  --accent-primary: #1f5f99;
+  --accent-primary-hover: #124a7a;
+  --accent-soft: rgba(31, 95, 153, 0.08);
+  --success-soft: rgba(22, 163, 74, 0.1);
+  --warning-soft: rgba(217, 119, 6, 0.1);
+  --error-soft: rgba(220, 38, 38, 0.1);
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  --transition-fast: 140ms ease;
+  --transition-base: 200ms ease;
+
+  --bg-sider: var(--surface-panel-2);
+  --color-text: var(--text-primary);
+
+  --shadow-0: rgba(31, 95, 153, 0.025);
+  --shadow-1: rgba(31, 95, 153, 0.05);
+  --shadow-2: rgba(31, 95, 153, 0.08);
+  --shadow-3: rgba(31, 95, 153, 0.11);
+  --shadow-4: rgba(31, 95, 153, 0.15);
+  --shadow-5: rgba(31, 95, 153, 0.2);
+
+  --min-width: 400px;
+
+  --color-bg-container: var(--surface-panel-2);
+  --color-bg-elevated: var(--surface-elevated);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-muted);
+  --color-trans-light: rgba(255, 255, 255, 0.86);
+  --color-trans-dark: rgba(0, 0, 0, 0.86);
+}
+
+:root {
+  --scrollbar-width: 4px;
+}
+
+::-webkit-scrollbar {
+  width: var(--scrollbar-width);
+  height: var(--scrollbar-width);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: calc(var(--scrollbar-width) / 2);
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-muted) 36%, transparent);
+  border-radius: calc(var(--scrollbar-width) / 2);
+  transition: background 0.2s ease;
+  cursor: pointer;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-secondary) 48%, transparent);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 36%, transparent) transparent;
+}

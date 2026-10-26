@@ -1,0 +1,155 @@
+/* Grok-like dark mode */
+:root.dark {
+  --main-1000: #ffffff;
+  --main-900: #f5f5f5;
+  --main-800: #e5e5e5;
+  --main-700: #d4d4d4;
+  --main-600: #a3a3a3;
+  --main-500: #737373;
+  --main-400: #525252;
+  --main-300: #3a3a3a;
+  --main-200: #262626;
+  --main-100: #1a1a1a;
+  --main-50: #111111;
+  --main-40: #0d0d0d;
+  --main-30: #0a0a0a;
+  --main-20: #080808;
+  --main-10: #050505;
+  --main-5: #030303;
+  --main-1: #010101;
+  --main-0: #000000;
+
+  --gray-10000: #ffffff;
+  --gray-2000: #fafafa;
+  --gray-1000: #f5f5f5;
+  --gray-900: #e5e5e5;
+  --gray-800: #d4d4d4;
+  --gray-700: #a3a3a3;
+  --gray-600: #737373;
+  --gray-500: #525252;
+  --gray-400: #404040;
+  --gray-300: #303030;
+  --gray-200: #262626;
+  --gray-150: #1f1f1f;
+  --gray-100: #171717;
+  --gray-50: #111111;
+  --gray-25: #0d0d0d;
+  --gray-10: #080808;
+  --gray-0: #000000;
+
+  --color-primary-50: #0b3558;
+  --color-primary-100: #124a7a;
+  --color-primary-500: #6aa9df;
+  --color-primary-700: #9bc8ee;
+  --color-primary-900: #d9ecff;
+
+  --main-color: #6aa9df;
+  --main-bright: #9bc8ee;
+
+  --color-secondary-50: #111111;
+  --color-secondary-100: #1f1f1f;
+  --color-secondary-500: #a3a3a3;
+  --color-secondary-700: #d4d4d4;
+  --color-secondary-900: #f5f5f5;
+
+  --color-success-50: #052e16;
+  --color-success-100: #14532d;
+  --color-success-500: #22c55e;
+  --color-success-700: #86efac;
+  --color-success-900: #dcfce7;
+
+  --color-error-50: #450a0a;
+  --color-error-100: #7f1d1d;
+  --color-error-500: #ef4444;
+  --color-error-700: #fca5a5;
+  --color-error-900: #fee2e2;
+
+  --color-warning-50: #451a03;
+  --color-warning-100: #78350f;
+  --color-warning-500: #f59e0b;
+  --color-warning-700: #fcd34d;
+  --color-warning-900: #fef3c7;
+
+  --color-info-50: #111111;
+  --color-info-100: #1f1f1f;
+  --color-info-500: #d4d4d4;
+  --color-info-700: #f5f5f5;
+  --color-info-900: #ffffff;
+
+  --color-accent-50: #111111;
+  --color-accent-100: #1f1f1f;
+  --color-accent-500: #f5f5f5;
+  --color-accent-700: #ffffff;
+  --color-accent-900: #ffffff;
+
+  --chart-palette-1: #ffffff;
+  --chart-palette-2: #d4d4d4;
+  --chart-palette-3: #a3a3a3;
+  --chart-palette-4: #737373;
+  --chart-palette-5: #525252;
+  --chart-palette-6: #f5f5f5;
+  --chart-palette-7: #e5e5e5;
+  --chart-palette-8: #8a8a8a;
+  --chart-palette-9: #3a3a3a;
+  --chart-palette-10: #262626;
+
+  --surface-page: #030303;
+  --surface-page-alt: #080808;
+  --surface-panel: #0d0d0d;
+  --surface-panel-2: #111111;
+  --surface-elevated: #141414;
+  --surface-input: #0a0a0a;
+  --surface-overlay: rgba(3, 3, 3, 0.92);
+
+  --text-primary: #f7f7f7;
+  --text-secondary: rgba(247, 247, 247, 0.68);
+  --text-muted: rgba(247, 247, 247, 0.44);
+  --text-inverse: #050505;
+
+  --border-subtle: rgba(247, 247, 247, 0.1);
+  --border-strong: rgba(247, 247, 247, 0.18);
+  --border-accent: rgba(247, 247, 247, 0.32);
+
+  --accent-primary: #6aa9df;
+  --accent-primary-hover: #9bc8ee;
+  --accent-soft: rgba(106, 169, 223, 0.14);
+  --success-soft: rgba(34, 197, 94, 0.14);
+  --warning-soft: rgba(245, 158, 11, 0.14);
+  --error-soft: rgba(239, 68, 68, 0.14);
+
+  --bg-sider: var(--surface-panel-2);
+  --color-text: var(--text-primary);
+
+  --color-bg-container: var(--surface-panel-2);
+  --color-bg-elevated: var(--surface-elevated);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-muted);
+
+  --shadow-0: rgba(0, 0, 0, 0.2);
+  --shadow-1: rgba(0, 0, 0, 0.28);
+  --shadow-2: rgba(0, 0, 0, 0.36);
+  --shadow-3: rgba(0, 0, 0, 0.44);
+  --shadow-4: rgba(0, 0, 0, 0.52);
+  --shadow-5: rgba(0, 0, 0, 0.64);
+
+  --color-trans-light: rgba(8, 8, 8, 0.86);
+  --color-trans-dark: rgba(255, 255, 255, 0.86);
+}
+
+:root.dark .markmap {
+  --markmap-max-width: 9999px;
+  --markmap-a-color: var(--accent-primary);
+  --markmap-a-hover-color: var(--accent-primary-hover);
+  --markmap-code-bg: var(--surface-panel-2);
+  --markmap-code-color: var(--text-secondary);
+  --markmap-highlight-bg: var(--warning-soft);
+  --markmap-table-border: 1px solid currentColor;
+  --markmap-font: 300 16px / 20px sans-serif;
+  --markmap-circle-open-bg: var(--surface-page);
+  --markmap-text-color: var(--text-secondary);
+  --markmap-highlight-node-bg: var(--error-soft);
+}
+
+:root.dark .md-editor {
+  --md-bk-color: var(--surface-page);
+}
