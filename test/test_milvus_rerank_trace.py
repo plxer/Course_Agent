@@ -63,10 +63,9 @@ async def _run(query: str, db_id: str | None, preview_chars: int, list_top: int)
     await pg_manager.ensure_knowledge_schema()
     await knowledge_base.initialize()
 
-    # KnowledgeBaseManager.initialize() 里对 _load_metadata 使用了 create_task，未 await；
-    # 若此处不等待，紧接着 aquery 时 MilvusKB.databases_meta 仍为空，会误报 Database not found。
     milvus_kb = knowledge_base._get_or_create_kb_instance("milvus")
-    await milvus_kb._load_metadata()
+    if not milvus_kb._metadata_loaded:
+        await milvus_kb._load_metadata()
 
     resolved_db_id = (db_id or "").strip()
     if not resolved_db_id:

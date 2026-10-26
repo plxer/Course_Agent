@@ -1,6 +1,7 @@
 """
-根据 knowledgebase/videos/caption 下的字幕 JSON，调用智能体生成分段总结，
-写入 knowledgebase/videos/summary/{video_id}.json，供前端「总结视频」使用。
+根据课程资源目录 videos/caption 下的字幕 JSON，调用智能体生成分段总结，
+写入 videos/summary/{video_id}.json，供前端「总结视频」使用。
+资源目录默认是仓库同级的 yuxi-knowledgebase，也可用 KNOWLEDGEBASE_DIR 指定。
 
 用法（在项目根目录，建议在 api 容器内执行）：
   uv run python scripts/generate_video_summaries.py
@@ -10,7 +11,6 @@
 
 import asyncio
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -22,9 +22,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from src import config as conf
 from src.agents.common import load_chat_model
+from src.services.textbook_service import knowledgebase_dir
 from src.utils import logger
 
-_KNOWLEDGEBASE_DIR = Path(os.environ.get("KNOWLEDGEBASE_DIR", "knowledgebase")).resolve()
+_KNOWLEDGEBASE_DIR = knowledgebase_dir()
 _CAPTION_DIR = _KNOWLEDGEBASE_DIR / "videos" / "caption"
 _SUMMARY_DIR = _KNOWLEDGEBASE_DIR / "videos" / "summary"
 

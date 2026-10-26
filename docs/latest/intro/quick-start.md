@@ -33,15 +33,17 @@ docker compose up --build -d
 
 ## 4. 准备课程资源
 
-默认读取项目根目录下的 `knowledgebase`：
+课本和视频不放在仓库里。默认读取仓库同级目录 `yuxi-knowledgebase`：
 
-- 课本：`knowledgebase/books/*.pdf`
-- 视频：`knowledgebase/videos/**`
+- 课本：`yuxi-knowledgebase/books/*.pdf`
+- 视频：`yuxi-knowledgebase/videos/**`
 
-可通过环境变量覆盖：
+本机若仓库在 `/home/wjk/workplace/Yuxi-Know_v0.5.0-beta`，资源目录就是 `/home/wjk/workplace/yuxi-knowledgebase`。
+
+可通过环境变量改成其它绝对路径（Docker 会按同一路径挂进容器）：
 
 ```bash
-KNOWLEDGEBASE_DIR=/path/to/knowledgebase
+KNOWLEDGEBASE_DIR=/path/to/yuxi-knowledgebase
 ```
 
 ## 5. 停止服务

@@ -46,8 +46,9 @@ def validate_file_path(file_path: str, db_id: str = None) -> str:
 
         # 允许 knowledgebase 目录（用于课程课本等预置文档导入）
         try:
-            kb_dir = os.environ.get("KNOWLEDGEBASE_DIR", "knowledgebase")
-            allowed_dirs.append(os.path.abspath(os.path.realpath(kb_dir)))
+            from src.services.textbook_service import knowledgebase_dir
+
+            allowed_dirs.append(os.path.abspath(os.path.realpath(knowledgebase_dir())))
         except Exception:
             pass
 

@@ -111,7 +111,7 @@
               <video
                 class="videos-card-video"
                 :src="getVideoUrl(video.id)"
-                preload="metadata"
+                preload="none"
                 muted
                 playsinline
               />
@@ -128,8 +128,11 @@
           </div>
         </div>
         <div v-else class="videos-empty">
-          <p>暂无视频，请将视频文件放入 knowledgebase/videos 文件夹</p>
-          <p class="videos-empty-hint">视频文件名应以 ChapterX 开头（X 为章节号）</p>
+          <p v-if="videosLoadError">{{ videosLoadError }}</p>
+          <template v-else>
+            <p>暂无视频，请将视频文件放入仓库同级目录 yuxi-knowledgebase/videos</p>
+            <p class="videos-empty-hint">视频文件名应以 ChapterX 开头（X 为章节号）</p>
+          </template>
         </div>
       </div>
     </main>
@@ -187,6 +190,7 @@ function chapterListHeading(chapterNum) {
 }
 
 const chapters = ref([])
+const videosLoadError = ref('')
 const selectedChapter = ref(null)
 const currentVideo = ref(null)
 const videoEl = ref(null)
@@ -217,13 +221,23 @@ const videoUrl = computed(() => {
 
 // 加载视频列表
 const loadVideos = async () => {
+  videosLoadError.value = ''
   try {
     const response = await listVideos()
-    chapters.value = response.chapters || []
-    // 按章节号排序
+    if (response == null || typeof response !== 'object' || !Array.isArray(response.chapters)) {
+      chapters.value = []
+      videosLoadError.value = '视频接口返回异常，请从 Web 入口访问或稍后刷新。'
+      return
+    }
+    chapters.value = response.chapters
     chapters.value.sort((a, b) => a.chapter - b.chapter)
   } catch (error) {
     console.error('加载视频列表失败:', error)
+    chapters.value = []
+    videosLoadError.value =
+      error?.name === 'AbortError'
+        ? '加载视频超时，请检查网络后刷新重试。'
+        : error?.message || '无法加载视频列表，请确认后端已启动且可访问 /api/course/videos'
   }
 }
 

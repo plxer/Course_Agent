@@ -102,7 +102,7 @@ export const useUserStore = defineStore('user', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          username: credentials.username,
+          student_id: credentials.student_id,
           password: credentials.password,
           phone_number: credentials.phone_number || null
         })

@@ -27,23 +27,18 @@
 
 ## 课本与视频资源目录
 
-默认路径：项目根目录下的 `knowledgebase` 目录。
+大文件不进 git。默认路径是仓库同级目录 `yuxi-knowledgebase`。
 
-- 课本：`knowledgebase/books/*.pdf`
-- 视频：`knowledgebase/videos/` 下任意子目录，文件名含 `Chapter数字` 会按章节归类
+- 课本：`yuxi-knowledgebase/books/*.pdf`
+- 视频：`yuxi-knowledgebase/videos/` 下任意子目录，文件名含 `Chapter数字` 会按章节归类
 
-可通过环境变量覆盖：
+可通过环境变量改成其它绝对路径：
 
 ```bash
-KNOWLEDGEBASE_DIR=/path/to/your/knowledgebase
+KNOWLEDGEBASE_DIR=/path/to/yuxi-knowledgebase
 ```
 
-Docker 部署时，api 服务默认挂载：
-
-```yaml
-volumes:
-  - ./knowledgebase:/app/knowledgebase
-```
+Docker 部署时，api 服务把该目录按同一路径挂进容器。未设置环境变量时，挂载仓库同级的 `yuxi-knowledgebase` 到容器内 `/yuxi-knowledgebase`。
 
 ## 课程对话说明
 

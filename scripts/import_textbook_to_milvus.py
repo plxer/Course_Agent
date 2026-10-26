@@ -12,7 +12,6 @@
 """
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 
@@ -28,13 +27,12 @@ TEXTBOOK_MD_REL = "ComputerNetworking-TopDown/ComputerNetworking-TopDown.md"
 async def main():
     from src import config
     from src.knowledge import knowledge_base
+    from src.services.textbook_service import knowledgebase_dir
     from src.storage.postgres.manager import pg_manager
     from src.repositories.knowledge_base_repository import KnowledgeBaseRepository
     from src.utils import logger
 
-    # 解析课本路径（支持 KNOWLEDGEBASE_DIR 环境变量）
-    kb_dir = os.environ.get("KNOWLEDGEBASE_DIR", "knowledgebase")
-    textbook_path = Path(kb_dir).resolve() / TEXTBOOK_MD_REL
+    textbook_path = knowledgebase_dir() / TEXTBOOK_MD_REL
     if not textbook_path.is_file():
         logger.error("课本文件不存在: %s", textbook_path)
         sys.exit(1)

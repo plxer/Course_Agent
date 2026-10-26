@@ -31,49 +31,33 @@ class KnowledgeBaseManager:
         self._metadata_lock = asyncio.Lock()
 
     async def initialize(self):
-        """异步初始化"""
-        # 初始化已存在的知识库实例
-        self._initialize_existing_kbs()
+        """异步初始化：等待知识库实例创建并加载元数据，避免对话时误报知识库不存在。"""
+        await self._initialize_existing_kbs()
         logger.info("KnowledgeBaseManager initialized")
 
     async def _load_all_metadata(self):
         """异步加载所有元数据 - 保留兼容性的空方法，现在由 KB 实例自行加载"""
         pass
 
-    def _initialize_existing_kbs(self):
-        """初始化已存在的知识库实例"""
+    async def _initialize_existing_kbs(self):
+        """初始化已存在的知识库实例（必须 await，不能 fire-and-forget）。"""
         from src.repositories.knowledge_base_repository import KnowledgeBaseRepository
 
-        async def _async_init():
-            kb_repo = KnowledgeBaseRepository()
-            rows = await kb_repo.get_all()
+        kb_repo = KnowledgeBaseRepository()
+        rows = await kb_repo.get_all()
 
-            kb_types_in_use = set()
-            for row in rows:
-                kb_type = row.kb_type or "lightrag"
-                kb_types_in_use.add(kb_type)
+        kb_types_in_use = {row.kb_type or "lightrag" for row in rows}
+        logger.info(f"[InitializeKB] 发现 {len(kb_types_in_use)} 种知识库类型: {kb_types_in_use}")
 
-            logger.info(f"[InitializeKB] 发现 {len(kb_types_in_use)} 种知识库类型: {kb_types_in_use}")
+        for kb_type in kb_types_in_use:
+            try:
+                await self._ensure_kb_instance(kb_type)
+                logger.info(f"[InitializeKB] {kb_type} 实例已初始化")
+            except Exception as e:
+                import traceback
 
-            # 为每种使用中的知识库类型创建实例并加载元数据
-            for kb_type in kb_types_in_use:
-                try:
-                    kb_instance = self._get_or_create_kb_instance(kb_type)
-                    # 让 KB 实例自行加载元数据
-                    await kb_instance._load_metadata()
-                    logger.info(f"[InitializeKB] {kb_type} 实例已初始化")
-                except Exception as e:
-                    logger.error(f"Failed to initialize {kb_type} knowledge base: {e}")
-                    import traceback
-
-                    logger.error(traceback.format_exc())
-
-        # 在事件循环中运行异步初始化
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(_async_init())
-        except RuntimeError:
-            asyncio.run(_async_init())
+                logger.error(f"Failed to initialize {kb_type} knowledge base: {e}")
+                logger.error(traceback.format_exc())
 
     def _get_or_create_kb_instance(self, kb_type: str) -> KnowledgeBase:
         """
@@ -94,6 +78,20 @@ class KnowledgeBaseManager:
 
         self.kb_instances[kb_type] = kb_instance
         logger.info(f"Created {kb_type} knowledge base instance")
+        return kb_instance
+
+    async def _ensure_kb_instance(self, kb_type: str) -> KnowledgeBase:
+        """获取或创建知识库实例，并确保已从 Postgres 加载元数据。
+
+        启动失败后的首次对话、以及 initialize 未 await 完成时，都依赖这里补加载，
+        否则 get_database_info 会因 databases_meta 为空而把已有库当成不存在。
+        """
+        kb_instance = self._get_or_create_kb_instance(kb_type)
+        if kb_instance._metadata_loaded:
+            return kb_instance
+        async with self._metadata_lock:
+            if not kb_instance._metadata_loaded:
+                await kb_instance._load_metadata()
         return kb_instance
 
     async def move_file(self, db_id: str, file_id: str, new_parent_id: str | None) -> dict:
@@ -129,7 +127,7 @@ class KnowledgeBaseManager:
         if not KnowledgeBaseFactory.is_type_supported(kb_type):
             raise KBNotFoundError(f"Unsupported knowledge base type: {kb_type}")
 
-        return self._get_or_create_kb_instance(kb_type)
+        return await self._ensure_kb_instance(kb_type)
 
     def _get_kb_for_database_sync(self, db_id: str) -> KnowledgeBase:
         """同步版本的 _get_kb_for_database，用于兼容同步调用"""
@@ -174,14 +172,29 @@ class KnowledgeBaseManager:
 
         all_databases = []
         for row in rows:
-            kb_instance = self._get_or_create_kb_instance(row.kb_type or "lightrag")
-            db_info = kb_instance.get_database_info(row.db_id)
-            if db_info:
-                # 补充 share_config、additional_params 与 kb_type（供按类型筛选）
-                db_info["share_config"] = row.share_config or {"is_shared": True, "accessible_departments": []}
-                db_info["additional_params"] = row.additional_params or {}
-                db_info["kb_type"] = row.kb_type or "lightrag"
-                all_databases.append(db_info)
+            db_info = None
+            try:
+                kb_instance = await self._ensure_kb_instance(row.kb_type or "lightrag")
+                db_info = kb_instance.get_database_info(row.db_id)
+            except Exception as e:
+                logger.warning(f"加载知识库实例失败 db_id={row.db_id} kb_type={row.kb_type}: {e}")
+
+            # Postgres 中已有的库不能因内存元数据未加载而从列表消失（课程对话会因此误报未找到）
+            if not db_info:
+                db_info = {
+                    "db_id": row.db_id,
+                    "name": row.name,
+                    "description": row.description,
+                    "kb_type": row.kb_type or "lightrag",
+                    "files": {},
+                    "row_count": 0,
+                    "status": "已连接",
+                }
+
+            db_info["share_config"] = row.share_config or {"is_shared": True, "accessible_departments": []}
+            db_info["additional_params"] = row.additional_params or {}
+            db_info["kb_type"] = row.kb_type or "lightrag"
+            all_databases.append(db_info)
         return {"databases": all_databases}
 
     async def check_accessible(self, user: dict, db_id: str) -> bool:
@@ -311,7 +324,7 @@ class KnowledgeBaseManager:
         if share_config is None:
             share_config = {"is_shared": True, "accessible_departments": []}
 
-        kb_instance = self._get_or_create_kb_instance(kb_type)
+        kb_instance = await self._ensure_kb_instance(kb_type)
         db_info = await kb_instance.create_database(database_name, description, embed_info, **kwargs)
         db_id = db_info["db_id"]
 

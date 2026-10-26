@@ -114,6 +114,8 @@ class PostgresManager(metaclass=SingletonMeta):
             return
         stmts = [
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS points INTEGER NOT NULL DEFAULT 0",
+            "DROP INDEX IF EXISTS ix_users_username",
+            "CREATE INDEX IF NOT EXISTS ix_users_username ON users (username)",
             "ALTER TABLE exercise_attempts ADD COLUMN IF NOT EXISTS chapter VARCHAR(32)",
             "ALTER TABLE exercise_attempts ADD COLUMN IF NOT EXISTS section_title VARCHAR(255)",
         ]

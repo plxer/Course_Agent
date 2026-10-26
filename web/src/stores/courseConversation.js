@@ -94,6 +94,10 @@ export const useCourseConversationStore = defineStore('courseConversation', () =
     }
   }
 
+  function markSearchDone() {
+    searchStatus.value = 'done'
+  }
+
   /** 清空当前轮次搜索状态（新消息发送或流结束时可调用） */
   function clearSearchState() {
     searchStatus.value = 'idle'
@@ -136,6 +140,7 @@ export const useCourseConversationStore = defineStore('courseConversation', () =
     setStreamController,
     setSearching,
     appendSearchSources,
+    markSearchDone,
     clearSearchState,
     findChat,
     setNextChatNumber,

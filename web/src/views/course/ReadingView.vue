@@ -31,7 +31,13 @@
                   @click="selectBook(book)"
                 >
                   <div class="reading-cover-frame">
-                    <img :src="getBookPageUrl(book.id, 1)" :alt="book.name" class="reading-cover-img" />
+                    <img
+                      :src="getBookPageUrl(book.id, 1, { thumb: true })"
+                      :alt="book.name"
+                      class="reading-cover-img"
+                      loading="lazy"
+                      decoding="async"
+                    />
                   </div>
                   <div class="reading-cover-info">
                     <div class="reading-card-tags">
@@ -115,8 +121,8 @@
           </div>
           <h3>暂无课本资料</h3>
           <p>
-            请将 PDF 文件放入项目根目录下 knowledgebase/books 文件夹（Docker
-            部署请挂载该目录到容器内 /app/knowledgebase）
+            请将 PDF 放到仓库同级目录 yuxi-knowledgebase/books（也可通过环境变量
+            KNOWLEDGEBASE_DIR 指定）
           </p>
         </div>
       </div>
@@ -355,9 +361,8 @@
               <div class="reading-chat-content ai loading">
                 <div
                   v-if="currentChatMessage"
-                  :key="`reading-loading-${currentChatMessage.length}`"
                   class="reading-chat-text reading-chat-markdown"
-                  v-html="renderMarkdownWithPageLinks(currentChatMessage)"
+                  v-html="renderMarkdownWithPageLinks(stripPageFooterWhileStreaming(currentChatMessage))"
                 />
                 <div v-else class="reading-chat-typing">
                   <span></span>
@@ -471,7 +476,7 @@
 <script setup>
 import { ref, onMounted, computed, nextTick, h, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { marked } from 'marked'
+import { renderCourseMarkdown } from '@/utils/courseMarkdown.js'
 import { Image, Images } from 'lucide-vue-next'
 import { message } from 'ant-design-vue'
 import CourseTopbar from '@/components/course/CourseTopbar.vue'
@@ -530,33 +535,38 @@ const handleSwitchAccount = () => {
 }
 
 function renderMarkdown(text) {
-  if (!text || typeof text !== 'string') return ''
-  return marked.parse(text, { gfm: true, breaks: true })
+  return renderCourseMarkdown(text)
 }
 
 /** 与课程对话页一致：课本页码 + 11 = PDF 页 */
 const TEXTBOOK_PAGE_OFFSET = 11
 
-function preprocessTextbookPageLineForMarkdown(text) {
-  if (!text || typeof text !== 'string') return text
-  return text.replace(/(对应课本页码[：:]\s*)(\d+(?:\s*[、，,]\s*\d+)*)/g, (_, label, group) => {
-    const nums = group.match(/\d+/g)
-    if (!nums?.length) return label + group
-    return label + nums.map((n) => `**${n}**`).join('、')
-  })
+function stripPageFooterWhileStreaming(text) {
+  const src = text || ''
+  const idx = src.lastIndexOf('对应课本页码')
+  if (idx < 0) return src
+  return src.slice(0, idx).replace(/\s+$/, '')
 }
 
 function renderMarkdownWithPageLinks(text) {
+  if (!text || typeof text !== 'string') return ''
   const bookId = selectedBook.value?.id
-  let html = renderMarkdown(preprocessTextbookPageLineForMarkdown(text))
+  let html = renderMarkdown(text)
   if (!html || !bookId) return html
-  html = html.replace(/<strong>(\d+)<\/strong>/g, (_, page) => {
-    const printed = parseInt(page, 10)
-    const pdfPage = printed + TEXTBOOK_PAGE_OFFSET
-    return `<a href="/reading?book=${encodeURIComponent(bookId)}&page=${pdfPage}&from=reading" class="reading-chat-page-link" data-book-id="${encodeURIComponent(bookId)}" data-page="${pdfPage}">第${printed}页</a>`
+  const idx = html.lastIndexOf('对应课本页码')
+  if (idx < 0) return html
+  const after = html.slice(idx).replace(/(对应课本页码[：:]\s*)([\s\S]*)/, (_, label, rest) => {
+    const linked = rest.replace(/\d+/g, (n, offset, s) => {
+      const prefix = s.slice(0, offset)
+      if (prefix.lastIndexOf('<') > prefix.lastIndexOf('>')) return n
+      const printed = parseInt(n, 10)
+      if (!printed) return n
+      const pdfPage = printed + TEXTBOOK_PAGE_OFFSET
+      return `<a href="/reading?book=${encodeURIComponent(bookId)}&page=${pdfPage}&from=reading" class="reading-chat-page-link" data-book-id="${encodeURIComponent(bookId)}" data-page="${pdfPage}">第${printed}页</a>`
+    })
+    return label + linked
   })
-  html = html.replace(/<\/a>\s*页/g, '</a>')
-  return html
+  return html.slice(0, idx) + after.replace(/<\/a>\s*页/g, '</a>')
 }
 
 function onReadingChatPageLinkClick(e) {
@@ -879,7 +889,9 @@ const loadBooks = async () => {
     console.error('加载课本列表失败:', error)
     books.value = []
     booksLoadError.value =
-      error?.message || '无法加载课本列表，请确认后端已启动且可访问 /api/course/books'
+      error?.name === 'AbortError'
+        ? '加载课本超时，请检查网络后刷新重试。'
+        : error?.message || '无法加载课本列表，请确认后端已启动且可访问 /api/course/books'
   }
 }
 
@@ -1420,32 +1432,46 @@ const sendChatMessage = async () => {
   currentChatMessage.value = ''
   chatStreamController.value = new AbortController()
 
+  let streamTextBuffer = ''
+  let streamFlushRaf = null
+  const flushStreamBuffer = () => {
+    streamFlushRaf = null
+    if (!streamTextBuffer) return
+    currentChatMessage.value = (currentChatMessage.value || '') + streamTextBuffer
+    streamTextBuffer = ''
+    nextTick(() => scrollChatToBottom())
+  }
+  const scheduleStreamFlush = () => {
+    if (streamFlushRaf != null) return
+    streamFlushRaf = requestAnimationFrame(flushStreamBuffer)
+  }
+  const stopStreamFlush = () => {
+    if (streamFlushRaf != null) {
+      cancelAnimationFrame(streamFlushRaf)
+      streamFlushRaf = null
+    }
+    flushStreamBuffer()
+  }
+
   try {
-    console.log(
-      '开始调用 courseChatStream, message:',
-      messageToSend,
-      'threadId:',
-      chat.threadId ?? chatThreadId.value
-    )
     await courseChatStream(
       messageToSend,
       chat.threadId ?? chatThreadId.value,
-      async (chunk) => {
-        console.log('收到 chunk:', chunk)
+      (chunk) => {
         if (chunk.status === 'init') {
           const tid = chunk.meta && chunk.meta.thread_id ? chunk.meta.thread_id : chunk.thread_id
           if (tid) {
             chat.threadId = tid
             chatThreadId.value = tid
           }
-        } else if (chunk.status === 'loading' && chunk.response !== undefined) {
-          // 追加增量内容
-          if (chunk.response) {
-            currentChatMessage.value = (currentChatMessage.value || '') + chunk.response
-          }
-          await nextTick()
-          scrollChatToBottom()
+        } else if (chunk.status === 'loading' && chunk.response) {
+          streamTextBuffer += chunk.response
+          scheduleStreamFlush()
         } else if (chunk.status === 'finished') {
+          stopStreamFlush()
+          if (typeof chunk.response === 'string' && chunk.response.length) {
+            currentChatMessage.value = chunk.response
+          }
           if (currentChatMessage.value) {
             chat.messages.push({ role: 'ai', content: currentChatMessage.value })
             currentChatMessage.value = ''
@@ -1453,6 +1479,7 @@ const sendChatMessage = async () => {
           isChatLoading.value = false
           scrollChatToBottom()
         } else if (chunk.status === 'error') {
+          stopStreamFlush()
           chat.messages.push({
             role: 'ai',
             content:
@@ -1476,6 +1503,7 @@ const sendChatMessage = async () => {
       }
     )
   } catch (error) {
+    stopStreamFlush()
     if (error.name === 'AbortError') {
       if (currentChatMessage.value) {
         chat.messages.push({ role: 'ai', content: currentChatMessage.value })
@@ -2626,12 +2654,19 @@ onMounted(async () => {
 .reading-chat-markdown strong {
   font-weight: 700;
 }
+.reading-chat-markdown a {
+  color: var(--accent-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
 .reading-chat-markdown .reading-chat-page-link {
   color: var(--accent-primary);
   text-decoration: none;
   font-weight: 600;
   border-bottom: 1px solid var(--accent-primary);
   cursor: pointer;
+  word-break: normal;
 }
 .reading-chat-markdown .reading-chat-page-link:hover {
   text-decoration: underline;

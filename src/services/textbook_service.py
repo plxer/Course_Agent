@@ -1,15 +1,27 @@
 """课本《计算机网络：自顶向下方法》章节目录与片段读取，用于出题时结合课本内容。"""
 
+import os
 import re
 from pathlib import Path
 
-# 课本路径（与 knowledgebase 中一致）
-TEXTBOOK_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "knowledgebase"
-    / "ComputerNetworking-TopDown"
-    / "ComputerNetworking-TopDown.md"
-)
+# 仓库根目录（src/services/textbook_service.py → 上两级）
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# 课本、视频等大文件固定放在仓库同级目录，不进入 git
+_DEFAULT_KNOWLEDGEBASE_DIR = _PROJECT_ROOT.parent / "yuxi-knowledgebase"
+
+
+def knowledgebase_dir() -> Path:
+    """课程资源根目录。未设置 KNOWLEDGEBASE_DIR 时使用仓库同级的 yuxi-knowledgebase。"""
+    raw = os.environ.get("KNOWLEDGEBASE_DIR", "").strip()
+    if not raw:
+        return _DEFAULT_KNOWLEDGEBASE_DIR.resolve()
+    path = Path(raw)
+    if path.is_absolute():
+        return path.resolve()
+    return (_PROJECT_ROOT / path).resolve()
+
+
+TEXTBOOK_PATH = knowledgebase_dir() / "ComputerNetworking-TopDown" / "ComputerNetworking-TopDown.md"
 
 # 章标题（与课本目录对应）
 CHAPTER_TITLES = {

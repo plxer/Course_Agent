@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import traceback
 import uuid
 from collections.abc import AsyncIterator
@@ -17,6 +18,106 @@ from src.repositories.agent_config_repository import AgentConfigRepository
 from src.repositories.conversation_repository import ConversationRepository
 from src.storage.postgres.manager import pg_manager
 from src.utils.logging_config import logger
+
+
+def _chunks_to_text(parts) -> str:
+    """把流式累积的 content（str 或多段块）拼成纯文本。"""
+    texts: list[str] = []
+    for part in parts or []:
+        if isinstance(part, str):
+            texts.append(part)
+        elif isinstance(part, list):
+            for block in part:
+                if isinstance(block, str):
+                    texts.append(block)
+                elif isinstance(block, dict) and block.get("type") == "text":
+                    texts.append(str(block.get("text") or ""))
+    return "".join(texts)
+
+
+# 从「对应课本页码」起到该段结束（含换行续写的页码），不限制同一行有多长
+_PAGE_FOOTER_BLOCK_RE = re.compile(
+    r"(?:^|\n)[ \t]*对应课本页码[：:][^\n]*(?:\n[ \t]*[\d、，, \t]+)*"
+)
+
+
+def _ensure_textbook_page_footer(text: str, pages: list[int]) -> tuple[str, bool]:
+    """正文中间的「对应课本页码」全部去掉，只在文末保留一行。返回 (全文, 是否改写)。"""
+    original = text or ""
+    found: set[int] = set()
+    for m in _PAGE_FOOTER_BLOCK_RE.finditer(original):
+        found.update(int(n) for n in re.findall(r"\d+", m.group(0) or ""))
+    found.update(p for p in pages if isinstance(p, int) and p > 0)
+    body = _PAGE_FOOTER_BLOCK_RE.sub("", original).rstrip()
+    if not found:
+        return body, body != original.rstrip()
+    footer = "对应课本页码：" + "、".join(str(p) for p in sorted(found))
+    ensured = f"{body}\n\n{footer}"
+    return ensured, ensured != original
+
+
+def _parse_tavily_sources(raw) -> list[dict]:
+    """从 Tavily 返回值提取 {title, url}，最多 8 条。"""
+    data = raw
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+        except Exception:
+            return []
+    if isinstance(data, list):
+        results = data
+    elif isinstance(data, dict):
+        results = data.get("results")
+    else:
+        return []
+    if not isinstance(results, list):
+        return []
+    sources: list[dict] = []
+    seen: set[str] = set()
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        title = str(item.get("title") or url).strip()
+        snippet = str(item.get("content") or "").replace("\n", " ").strip()[:200]
+        sources.append({"title": title, "url": url, "snippet": snippet})
+        if len(sources) >= 8:
+            break
+    return sources
+
+
+async def _required_tavily_search(query: str) -> tuple[list[dict], str]:
+    """开启网络搜索时必须调用一次 Tavily。返回 (来源列表, 写入提示词的摘录)。"""
+    from src.agents.common.tools import get_tavily_search
+
+    tavily = get_tavily_search()
+    if tavily is None:
+        logger.warning("已开启网络搜索，但 Tavily 未配置（缺少 TAVILY_API_KEY）")
+        return [], ""
+    q = (query or "").strip()
+    if not q:
+        return [], ""
+    try:
+        raw = await tavily.ainvoke({"query": q})
+    except Exception as e:
+        logger.exception("强制 Tavily 搜索失败: %s", e)
+        return [], ""
+    sources = _parse_tavily_sources(raw)
+    if not sources:
+        return [], ""
+    lines = []
+    slim: list[dict] = []
+    for s in sources:
+        slim.append({"title": s["title"], "url": s["url"]})
+        line = f"- {s['title']}\n  {s['url']}"
+        if s.get("snippet"):
+            line += f"\n  {s['snippet']}"
+        lines.append(line)
+    prompt = "【网络搜索结果】\n" + "\n".join(lines)
+    return slim, prompt
 
 
 def _build_state_files(attachments: list[dict]) -> dict:
@@ -352,45 +453,73 @@ async def stream_agent_chat(
 
     messages = [human_message]
 
+    enable_web = config.get("enable_web_search") is True
+    required_search_sources: list[dict] = []
+    tavily_prompt_block = ""
+    if enable_web:
+        # 先完整搜索，再把结果和用户问题一起送去生成；搜索未完成前不调用模型
+        yield make_chunk(
+            status="loading",
+            tool_calling={"name": "tavily_search", "query": query},
+        )
+        required_search_sources, tavily_prompt_block = await _required_tavily_search(query)
+        yield make_chunk(
+            status="loading",
+            search_sources=required_search_sources,
+            search_status="done",
+        )
+
     # 课程知识库：若本次请求带上了课本检索上下文，则将其与用户问题一起放入首条消息，便于模型基于课本作答
     course_context = config.get("course_knowledge_context")
-    if course_context and isinstance(course_context, str) and course_context.strip():
-        enable_web = config.get("enable_web_search") is True
-        page_instruction = (
-            "仅以 **数字** 形式给出课本页码（如 **35**、**36**），不要在 **数字** 后面再写「页」字；"
-            "前端会显示为「第N页」（N 为课本页码），跳转阅读器时自动换算为 PDF 页（课本页码+11）。"
-        )
+    course_context = course_context.strip() if isinstance(course_context, str) else ""
+    if course_context or tavily_prompt_block:
         web_instruction = ""
-        source_format_instruction = ""
         if enable_web:
-            web_instruction = (
-                "\n本对话已开启网络搜索。请严格依据上述课本摘录作答，"
-                "并请在本轮回答中至少使用一次网络搜索工具以补充或核实信息，使课本与网络内容紧密配合。\n\n"
-            )
-            source_format_instruction = (
-                "开启网络搜索时：「涉及知识点」可简要概括课本与补充信息中的核心概念；"
-                "「对应课本页码」仅填写课本摘录中的页码数字，不要写成网址或网页标题。\n\n"
-            )
+            if tavily_prompt_block:
+                web_instruction = (
+                    "\n系统已完成网络搜索，本轮禁止再调用任何搜索工具。"
+                    "请综合【课本摘录】与【网络搜索结果】写成一篇完整答案："
+                    "概念与原理以课本为准，搜索结果只作补充或对照。"
+                    "不要边写边搜，不要把网址写进正文或页码行。\n\n"
+                )
+            else:
+                web_instruction = (
+                    "\n本对话已开启网络搜索，但本轮检索未返回可用结果。"
+                    "请严格依据课本摘录作答，禁止再调用搜索工具。\n\n"
+                )
         summary_lines_instruction = (
-            "3. 正文结束后另起段落，必须追加两行，且均为「标签：内容」同一行（标签六字与全角冒号须原样保留）：\n"
-            "一行写作「涉及知识点：」并在冒号后写简要知识点（多项用顿号分隔）；\n"
-            "下一行写作「对应课本页码：」并在冒号后只写课本页码数字（多页用顿号分隔）。"
-            + page_instruction
-            + "\n\n"
+            "3. 正文里不要写页码、不要写「第N页」、不要出现「对应课本页码」。"
+            "全文结束后另起最后一段，只保留两行："
+            "「涉及知识点：」后写简要知识点（顿号分隔）；"
+            "「对应课本页码：」后只写课本页码数字（顿号分隔），这一行必须是整段回答的最后一行。\n\n"
         )
+        textbook_block = f"【课本摘录】\n{course_context}\n\n" if course_context else ""
+        search_block = f"{tavily_prompt_block}\n\n" if tavily_prompt_block else ""
+        page_note = "摘录中的页码仅供你定位，不要写进正文，只放在最后一行「对应课本页码」。\n"
+        if course_context and tavily_prompt_block:
+            intro = (
+                "以下分别给出课本摘录与网络搜索结果。请先读完两份材料，再综合成一篇完整答案："
+                "概念与原理以课本为准，搜索结果用于补充、对照或举例。\n\n"
+                + page_note
+            )
+        elif course_context:
+            intro = (
+                "以下是从《计算机网络：自顶向下方法》课本中检索到的相关内容，请严格基于课本摘录作答。\n\n"
+                + page_note
+            )
+        else:
+            intro = "请结合下列信息回答用户问题。\n"
         wrapped_content = (
-            "以下是从《计算机网络：自顶向下方法》课本中检索到的相关内容，请严格基于课本摘录作答。\n\n"
-            "重要说明：摘录中标注的 **数字** 为课本页码（与纸书页脚一致），引用时请原样使用这些 **数字**。\n"
-            "请你：\n"
+            intro
+            + "请你：\n"
             "1. 先直接回应用户的问题：用自然、连贯的表述解释相关概念或原理；若用户附有图片，先说明图中表达了什么、"
             "各符号或流程的含义，再结合课本说明。不要一上来先列「涉及知识点」或要点清单。\n"
-            "2. 主体讲清问题后再写上述两行收尾，中间为正文，不要把「涉及知识点」「对应课本页码」插在正文开头。\n"
+            "2. 主体讲清问题后再写收尾行；中间正文禁止出现「对应课本页码」或页码数字加粗。\n"
             + summary_lines_instruction
-            + source_format_instruction
             + web_instruction
-            + "【课本摘录】\n"
-            f"{course_context.strip()}\n\n"
-            "【用户问题】\n"
+            + textbook_block
+            + search_block
+            + "【用户问题】\n"
             f"{query}"
         )
         if image_content:
@@ -438,6 +567,10 @@ async def stream_agent_chat(
         agent_config = {**agent_config, "enable_web_search": bool(config["enable_web_search"])}
     if "knowledges" in config:
         agent_config = {**agent_config, "knowledges": config["knowledges"] if config["knowledges"] else []}
+    # 搜索已在生成前完成并写入提示词：关掉 Tavily 工具，避免模型边写边再搜
+    if enable_web:
+        tools = [t for t in (agent_config.get("tools") or []) if "tavily" not in str(t).lower()]
+        agent_config = {**agent_config, "enable_web_search": False, "tools": tools}
 
     if image_content:
         vm = ((getattr(conf, "vision_model", None) or "").strip() or DEFAULT_VISION_MODEL_SPEC)
@@ -448,13 +581,14 @@ async def stream_agent_chat(
     tool_use_instruction = ""
     if agent_config.get("enable_web_search") or (agent_config.get("knowledges") and len(agent_config.get("knowledges", [])) > 0):
         parts = []
-        if agent_config.get("enable_web_search"):
+        if agent_config.get("enable_web_search") and not required_search_sources:
             parts.append("联网搜索")
         if agent_config.get("knowledges") and len(agent_config["knowledges"]) > 0:
             parts.append("知识库检索")
-        tool_use_instruction = (
-            f"本回合用户已开启「{'」与「'.join(parts)}」，请在本轮回答中主动使用相应工具获取信息，不要仅依赖对话上文作答。"
-        )
+        if parts:
+            tool_use_instruction = (
+                f"本回合用户已开启「{'」与「'.join(parts)}」，请在本轮回答中主动使用相应工具获取信息，不要仅依赖对话上文作答。"
+            )
 
     input_context = {
         "user_id": user_id,
@@ -563,6 +697,17 @@ async def stream_agent_chat(
             else:
                 msg_dict = msg.model_dump()
                 yield make_chunk(msg=msg_dict, metadata=metadata, status="loading")
+                tool_name = str(msg_dict.get("name") or "").lower()
+                if (msg_dict.get("type") == "tool" or tool_name) and "tavily" in tool_name:
+                    extra_sources = [
+                        {"title": s["title"], "url": s["url"]} for s in _parse_tavily_sources(msg_dict.get("content"))
+                    ]
+                    if extra_sources:
+                        seen_urls = {s["url"] for s in required_search_sources}
+                        new_sources = [s for s in extra_sources if s["url"] not in seen_urls]
+                        required_search_sources.extend(new_sources)
+                        if new_sources:
+                            yield make_chunk(status="loading", search_sources=new_sources)
 
                 # 显式下发「正在搜索」事件，便于前端稳定显示（不依赖 msg.type 命名）
                 tool_calls = msg_dict.get("tool_calls") or []
@@ -608,6 +753,10 @@ async def stream_agent_chat(
         async for chunk in check_and_handle_interrupts(agent, langgraph_config, make_chunk, meta, thread_id):
             yield chunk
 
+        answer_text = _chunks_to_text(accumulated_content)
+        book_pages = [int(p) for p in (config.get("course_book_pages") or []) if str(p).lstrip("-").isdigit()]
+        ensured_text, page_rewritten = _ensure_textbook_page_footer(answer_text, book_pages)
+
         meta["time_cost"] = asyncio.get_event_loop().time() - start_time
         try:
             graph = await agent.get_graph()
@@ -619,7 +768,12 @@ async def stream_agent_chat(
         if agent_state:
             yield make_chunk(status="agent_state", agent_state=agent_state, meta=meta)
 
-        yield make_chunk(status="finished", meta=meta)
+        finished_kwargs: dict = {"status": "finished", "meta": meta}
+        if page_rewritten:
+            finished_kwargs["content"] = ensured_text
+        if required_search_sources:
+            finished_kwargs["search_sources"] = required_search_sources
+        yield make_chunk(**finished_kwargs)
 
         model_name = input_context.get("agent_config") and input_context["agent_config"].get("model")
         await save_messages_from_langgraph_state(
@@ -629,6 +783,13 @@ async def stream_agent_chat(
             config_dict=langgraph_config,
             model_name=model_name or None,
         )
+        patch_kwargs: dict = {}
+        if page_rewritten:
+            patch_kwargs["content"] = ensured_text
+        if required_search_sources:
+            patch_kwargs["extra_metadata_patch"] = {"search_sources": required_search_sources}
+        if patch_kwargs:
+            await conv_repo.patch_last_assistant_message(thread_id, **patch_kwargs)
 
     except (asyncio.CancelledError, ConnectionError) as e:
         if isinstance(e, asyncio.CancelledError):

@@ -30,11 +30,13 @@ from src.services.llm_usage_log_service import (
     extract_usage_from_lc_response,
     log_course_aux_llm_call,
 )
-from src.services.textbook_service import get_textbook_chapters
+from src.services.textbook_service import get_textbook_chapters, knowledgebase_dir
+from src.repositories.conversation_repository import ConversationRepository
 from src.storage.postgres.models_business import (
     BookReadingPosition,
     ExerciseAttempt,
     MallItem,
+    Message,
     User,
     UserMallItem,
 )
@@ -59,23 +61,9 @@ def _sample_kp_score_with_thompson(wrong_attempts: float, correct_attempts: floa
     return random.betavariate(a, b)
 
 
-# 课本/视频根目录：KNOWLEDGEBASE_DIR 可设为绝对路径或相对「项目根」的片段。
-# 默认 <项目根>/knowledgebase，按本文件位置解析项目根，不依赖进程 cwd（避免从子目录启动时找不到 books）。
-_COURSE_ROUTER_DIR = Path(__file__).resolve()
-_PROJECT_ROOT = _COURSE_ROUTER_DIR.parents[2]  # server/routers/course_router.py
-
-
-def _resolved_knowledgebase_dir() -> Path:
-    raw = os.environ.get("KNOWLEDGEBASE_DIR", "").strip()
-    if not raw:
-        return (_PROJECT_ROOT / "knowledgebase").resolve()
-    p = Path(raw)
-    if p.is_absolute():
-        return p
-    return (_PROJECT_ROOT / p).resolve()
-
-
-_KNOWLEDGEBASE_DIR = _resolved_knowledgebase_dir()
+# 课本/视频在仓库外：默认仓库同级 yuxi-knowledgebase，也可用 KNOWLEDGEBASE_DIR 指定绝对路径。
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]  # server/routers/course_router.py
+_KNOWLEDGEBASE_DIR = knowledgebase_dir()
 _BOOKS_DIR = _KNOWLEDGEBASE_DIR / "books"
 _VIDEOS_DIR = _KNOWLEDGEBASE_DIR / "videos"
 
@@ -213,11 +201,18 @@ def list_videos():
 
 @course.get("/videos/{video_id}")
 def get_video(video_id: str):
-    """视频文件流，支持 Range 便于拖动进度。"""
+    """视频文件流，支持 Range 便于拖动进度。不带 filename，避免 Content-Disposition: attachment 导致远程播放失败。"""
     path = _resolve_video_path(video_id)
     if not path or not path.is_file():
         raise HTTPException(status_code=404, detail="视频不存在")
-    return FileResponse(path, media_type="video/mp4", filename=path.name)
+    return FileResponse(
+        path,
+        media_type="video/mp4",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
 
 
 @course.get("/videos/{video_id}/caption")
@@ -252,7 +247,7 @@ def get_video_summary(video_id: str):
 
 
 # 课程知识库列表：用户可在对话页选择，选中后对话会先检索对应课本再作答
-# pdf_book_id：对应课本伴读中的 PDF（knowledgebase/books 下文件名不含扩展名），用于页码跳转
+# pdf_book_id：对应课本伴读中的 PDF（yuxi-knowledgebase/books 下文件名不含扩展名），用于页码跳转
 COURSE_KNOWLEDGE_BASES = [
     {"id": "computer_networking", "name": "计算机网络", "pdf_book_id": "ComputerNetworking-TopDown-v8-2021"},
 ]
@@ -413,9 +408,10 @@ def _course_chunks_top1_and_adjacent_pages(query: str, chunks: list[dict]) -> li
     return [best_by_page[p] for p in sorted(selected)]
 
 
-async def _get_course_knowledge_context(query: str, kb_id: str, current_user) -> str:
+async def _get_course_knowledge_context(query: str, kb_id: str, current_user) -> tuple[str, list[int]]:
     """
     根据课程知识库 id 从 Milvus 检索上下文。无回退：找不到对应库或调用失败即报错。
+    返回 (课本摘录, 命中的课本页码列表，升序去重)。
     """
     course_entry = next((c for c in COURSE_KNOWLEDGE_BASES if c.get("id") == kb_id), None)
     display_name = course_entry.get("name", "") if course_entry else ""
@@ -455,11 +451,12 @@ async def _get_course_knowledge_context(query: str, kb_id: str, current_user) ->
         ) from e
 
     if not chunks:
-        return ""
+        return "", []
 
     chunks = _course_chunks_top1_and_adjacent_pages(query, chunks)
 
     parts = []
+    pages: list[int] = []
     total = 0
     max_chars = 8000
     for item in chunks:
@@ -471,7 +468,8 @@ async def _get_course_knowledge_context(query: str, kb_id: str, current_user) ->
         bp = meta.get("book_page", -1)
         page_line = ""
         if isinstance(bp, int) and bp > 0:
-            page_line = f"【本段对应课本页码 **{bp}**，引用时请仍写 **{bp}**】\n"
+            pages.append(bp)
+            page_line = f"（本段来自课本第 {bp} 页，仅供定位，不要在正文中写出页码）\n"
         block = f"【{source}】\n{page_line}{content}\n" if source else f"{page_line}{content}\n"
         if total + len(block) > max_chars:
             block = block[: max_chars - total]
@@ -479,7 +477,8 @@ async def _get_course_knowledge_context(query: str, kb_id: str, current_user) ->
         total += len(block)
         if total >= max_chars:
             break
-    return "\n".join(parts).strip() if parts else ""
+    uniq_pages = sorted(dict.fromkeys(pages))
+    return ("\n".join(parts).strip() if parts else "", uniq_pages)
 
 
 def _message_content_to_text(content) -> str:
@@ -681,6 +680,21 @@ _COURSE_DIALOGUE_FOLLOWUP_SUBSTRINGS: frozenset[str] = frozenset(
         "你上面",
         "换句话说",
         "换言之",
+        "你说错了",
+        "说错了",
+        "讲错了",
+        "写错了",
+        "表述有问题",
+        "表述不对",
+        "这句话",
+        "这句",
+        "哪里错",
+        "哪儿错",
+        "不对吧",
+        "不是这个意思",
+        "你刚才说",
+        "纠正",
+        "更正一下",
     }
 )
 _COURSE_DIALOGUE_FOLLOWUP_EN_SNIPPETS: frozenset[str] = frozenset(
@@ -709,46 +723,95 @@ def _course_query_is_dialogue_followup(query: str) -> bool:
     return any(s in low for s in _COURSE_DIALOGUE_FOLLOWUP_EN_SNIPPETS)
 
 
-async def _is_query_related_to_computer_networking(
+# 仅拦截明显违规/严重跑题；宁可漏拦也不要用宽泛关键词误杀课程追问
+_COURSE_HARD_REJECT_RE = re.compile(
+    r"(自杀|自残|割腕|如何杀人|怎么杀人|制作炸弹|炸弹制作|炸药配方|"
+    r"冰毒|海洛因|可卡因|贩毒|儿童色情|"
+    r"恐怖主义|制作枪支|如何制作武器)",
+    re.I,
+)
+
+
+def _course_query_hard_reject(query: str) -> bool:
+    return bool(_COURSE_HARD_REJECT_RE.search(query or ""))
+
+
+async def _recent_course_dialogue(db: AsyncSession | None, thread_id: str | None) -> str:
+    """取本线程最近若干轮用户/助手正文，供相关性判断看上下文。"""
+    if db is None or not (thread_id or "").strip():
+        return ""
+    try:
+        conv_repo = ConversationRepository(db)
+        conv = await conv_repo.get_conversation_by_thread_id(thread_id.strip())
+        if not conv:
+            return ""
+        result = await db.execute(
+            select(Message.role, Message.content)
+            .where(Message.conversation_id == conv.id)
+            .order_by(Message.created_at.desc())
+            .limit(12)
+        )
+        rows = list(reversed(result.all()))
+    except Exception as e:
+        logger.warning("读取课程对话上下文失败: %s", e)
+        return ""
+    lines: list[str] = []
+    for role, content in rows:
+        if role not in ("user", "assistant", "human", "ai"):
+            continue
+        text = " ".join((content or "").split())
+        if not text:
+            continue
+        label = "用户" if role in ("user", "human") else "助手"
+        lines.append(f"{label}: {text[:240]}")
+    return "\n".join(lines[-8:])
+
+
+async def _classify_course_query_relevance(
     query: str,
     *,
     db: AsyncSession | None = None,
     stats_user_id: int | None = None,
-) -> bool:
+    thread_id: str | None = None,
+) -> str:
     """
-    判断用户问题是否与《计算机网络》课程相关。不相关则返回 False，便于尽早拒绝以节省 token。
-    调用异常或超时时视为相关，避免误拦。
+    返回 allow / off_topic / disallowed。
+    网络术语命中则放行；严重违规词拒绝；其余交给小模型，且必须带上对话上下文。
+    调用异常时视为 allow，避免误拦。
     """
     query = (query or "").strip()[:500]
     if not query:
-        return False
-
+        return "off_topic"
+    if _course_query_hard_reject(query):
+        return "disallowed"
     if _course_query_has_networking_keyword_hint(query):
-        return True
+        return "allow"
 
-    # 举例/总结/没听懂等不含术语的跟进句，fast 模型易误判；课程页已限定知识库，直接放行
-    if _course_query_is_dialogue_followup(query):
-        return True
+    history = await _recent_course_dialogue(db, thread_id)
+    # 已有课程对话时，短追问（没听懂/什么意思/你说错了）直接放行，避免小模型只看当前句
+    if history and _course_query_is_dialogue_followup(query):
+        return "allow"
 
     from langchain_core.messages import HumanMessage, SystemMessage
 
     prompt = (
-        "你是一个判断题助手。仅根据用户的问题判断：该问题是否与《计算机网络》课程/教材范畴相关？\n"
+        "你是一个判断题助手。判断用户「当前问题」是否属于《计算机网络》课程对话。\n"
         "相关包括：网络协议与体系结构、TCP/IP、HTTP、DNS、路由与交换、SDN/NFV/OpenFlow、"
-        "数据中心与云网络、无线与移动网络、网络安全、拥塞控制、Socket、QoS、CDN、P2P 等；"
-        "含英文缩写的专业名词（如 SDN、BGP、MPLS）若属于网络领域，一律算相关。\n"
-        "特别重要：若用户是在延续课程对话并提出举例、类比、总结、澄清、重讲、追问含义、对比、"
-        "翻译或表示没听懂等，即使当前一句里没有出现网络术语，只要可能是针对《计算机网络》内容的后续提问，"
-        "一律视为相关，回答 YES。\n"
-        "不相关包括：与计算机网络无关的纯数学、其它工科课程、明显与课程对话无关的生活闲聊、"
-        "与网络无关的通用编程语法等。\n"
+        "数据中心与云网络、无线与移动网络、网络安全、拥塞控制、Socket、QoS、CDN、P2P 等。\n"
+        "必须结合「对话上下文」判断：若用户在追问上一轮讲解、纠正/质疑 AI 表述、要求举例、总结、"
+        "重讲、翻译或表示没听懂，即使当前句没有网络术语，也一律 YES。\n"
+        "仅当当前问题明显是另一门课、生活闲聊、或与网络课程完全无关，且无法解释为对上文的追问时，"
+        "才回答 NO。不确定时回答 YES。\n"
         "只回答一个词：YES 或 NO。"
     )
+    human = query
+    if history:
+        human = f"【对话上下文】\n{history}\n\n【当前问题】\n{query}"
     try:
         model = load_chat_model(conf.fast_model)
         msg_list = [
             SystemMessage(content=prompt),
-            HumanMessage(content=query),
+            HumanMessage(content=human),
         ]
         resp = await model.ainvoke(msg_list)
         text = _message_content_to_text(
@@ -767,11 +830,11 @@ async def _is_query_related_to_computer_networking(
                 source="course_query_relevance",
             )
         if _llm_answer_is_no_relevant(text):
-            return False
-        return True
+            return "off_topic"
+        return "allow"
     except Exception as e:
         logger.warning("课程问题相关性检测失败，视为相关: %s", e)
-        return True
+        return "allow"
 
 
 @course.post("/chat/stream")
@@ -799,13 +862,23 @@ async def course_chat_stream(
     query_for_llm = q_raw or "请结合《计算机网络》课本，说明附图在表达什么、图中各部分含义，并联系课本相关内容。"
 
     # 带图时跳过纯文本相关性模型（无法看图），视为课程场景内有效提问
-    if not has_image and not await _is_query_related_to_computer_networking(
-        q_raw, db=db, stats_user_id=current_user.id
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="您的问题与《计算机网络》课程内容无关。为节省资源，请仅在此处询问与计算机网络相关的问题（如协议、TCP/IP、HTTP、DNS、SDN、路由、网络安全等）。",
+    if not has_image:
+        relevance = await _classify_course_query_relevance(
+            q_raw,
+            db=db,
+            stats_user_id=current_user.id,
+            thread_id=request.thread_id,
         )
+        if relevance == "disallowed":
+            raise HTTPException(
+                status_code=400,
+                detail="该问题涉及不当或违规内容，无法作答。",
+            )
+        if relevance == "off_topic":
+            raise HTTPException(
+                status_code=400,
+                detail="您的问题与《计算机网络》课程内容无关。为节省资源，请仅在此处询问与计算机网络相关的问题（如协议、TCP/IP、HTTP、DNS、SDN、路由、网络安全等）。",
+            )
 
     # 课程对话优先使用环境变量 DEFAULT_AGENT_ID，否则 config，否则固定 ChatbotAgent（不依赖 agents 顺序）
     agent_id = (os.getenv("DEFAULT_AGENT_ID") or "").strip() or conf.default_agent_id or "ChatbotAgent"
@@ -825,11 +898,13 @@ async def course_chat_stream(
         config["enable_web_search"] = request.enable_web_search
     # 已校验 kb_id 必选，检索课本并注入（仅图时用宽泛查询词召回课本摘录）
     retrieval_query = q_raw if q_raw else "计算机网络 协议 体系结构 课本"
-    context = await _get_course_knowledge_context(
+    context, book_pages = await _get_course_knowledge_context(
         retrieval_query, kb_id, current_user
     )
     if context:
         config["course_knowledge_context"] = context
+    if book_pages:
+        config["course_book_pages"] = book_pages
     meta = request.meta or {}
     if "request_id" not in meta or not meta.get("request_id"):
         meta["request_id"] = str(uuid.uuid4())
@@ -864,11 +939,11 @@ async def course_chat_stream(
 
 @course.get("/books")
 def list_books():
-    """课本列表：knowledgebase/books 下的 PDF。"""
+    """课本列表：课程资源目录 books 下的 PDF。"""
     items = _list_pdf_books()
     if not items:
         logger.warning(
-            "课本列表为空: books_dir=%s is_dir=%s (Docker 需挂载 knowledgebase，例如 ./knowledgebase:/app/knowledgebase)",
+            "课本列表为空: books_dir=%s is_dir=%s (大文件在仓库外，默认挂载仓库同级 yuxi-knowledgebase)",
             _BOOKS_DIR,
             _BOOKS_DIR.is_dir(),
         )
@@ -897,25 +972,54 @@ def get_book_pages(book_id: str):
 # --- 课本某一页图片 ---
 
 
+_PAGE_CACHE_DIR = _PROJECT_ROOT / "saves" / "book_page_cache"
+
+
+def _render_book_page_jpeg(path: Path, page_num: int, *, thumb: bool) -> bytes:
+    """渲染一页为 JPEG，并按 PDF mtime 磁盘缓存。thumb 用于封面，避免列表页拉全幅图。"""
+    zoom = 0.35 if thumb else 1.4
+    quality = 70 if thumb else 78
+    tag = "thumb" if thumb else "full"
+    safe_stem = re.sub(r"[^A-Za-z0-9._-]", "_", path.stem)
+    cache_dir = _PAGE_CACHE_DIR / safe_stem
+    cache_file = cache_dir / f"{page_num}_{tag}.jpg"
+    try:
+        if cache_file.is_file() and cache_file.stat().st_mtime >= path.stat().st_mtime:
+            return cache_file.read_bytes()
+    except OSError:
+        pass
+    doc = fitz.open(path)
+    try:
+        if page_num > len(doc):
+            raise HTTPException(status_code=404, detail="页码超出范围")
+        page = doc[page_num - 1]
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        data = pix.tobytes(output="jpeg", jpg_quality=quality)
+    finally:
+        doc.close()
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file.write_bytes(data)
+    except OSError:
+        pass
+    return data
+
+
 @course.get("/books/{book_id}/page/{page_num}")
-def get_book_page_image(book_id: str, page_num: int):
-    """返回指定课本指定页的 PNG 图片。"""
+def get_book_page_image(book_id: str, page_num: int, thumb: bool = False):
+    """返回指定课本指定页的 JPEG（可缓存）。thumb=1 为封面缩略图。"""
     if page_num < 1:
         raise HTTPException(status_code=400, detail="页码从 1 开始")
     path = _resolve_book_path(book_id)
     if not path or not path.is_file():
         raise HTTPException(status_code=404, detail="课本不存在")
     try:
-        doc = fitz.open(path)
-        try:
-            if page_num > len(doc):
-                raise HTTPException(status_code=404, detail="页码超出范围")
-            page = doc[page_num - 1]
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-            png_bytes = pix.tobytes(output="png")
-            return Response(content=png_bytes, media_type="image/png")
-        finally:
-            doc.close()
+        data = _render_book_page_jpeg(path, page_num, thumb=thumb)
+        return Response(
+            content=data,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
     except HTTPException:
         raise
     except Exception as e:

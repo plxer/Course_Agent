@@ -24,6 +24,15 @@ from src.utils.datetime_utils import format_utc_datetime, utc_now_naive
 Base = declarative_base()
 
 
+class StudentRoster(Base):
+    """允许注册的学生学号名单"""
+
+    __tablename__ = "student_roster"
+
+    student_id = Column(String(64), primary_key=True)
+    name = Column(String(128), nullable=False)
+
+
 class Department(Base):
     """部门模型"""
 
@@ -52,7 +61,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    username = Column(String, nullable=False, unique=True, index=True)  # 显示名称
+    username = Column(String, nullable=False, index=True)  # 显示名称
     user_id = Column(String, nullable=False, unique=True, index=True)  # 登录ID
     phone_number = Column(String, nullable=True, unique=True, index=True)  # 手机号
     avatar = Column(String, nullable=True)  # 头像URL

@@ -93,7 +93,8 @@ class MilvusKB(KnowledgeBase):
         # self.milvus_port = kwargs.get('milvus_port', int(os.getenv('MILVUS_PORT', '19530')))
         self.milvus_token = kwargs.get("milvus_token", os.getenv("MILVUS_TOKEN") or "")
         self.milvus_uri = kwargs.get("milvus_uri", os.getenv("MILVUS_URI") or "http://localhost:19530")
-        self.milvus_db = kwargs.get("milvus_db") or "yuxi_know"
+        # 须与 compose 的 MILVUS_DB_NAME 一致。历史数据在 default；写死 yuxi_know 会连到空集合，对话没有课本页码。
+        self.milvus_db = kwargs.get("milvus_db") or os.getenv("MILVUS_DB_NAME") or "default"
 
         # 连接名称
         self.connection_alias = f"milvus_{hashstr(work_dir, 6)}"
@@ -119,24 +120,36 @@ class MilvusKB(KnowledgeBase):
         return "milvus"
 
     def _init_connection(self):
-        """初始化 Milvus 连接"""
-        try:
-            # 连接到 Milvus
-            connections.connect(alias=self.connection_alias, uri=self.milvus_uri, token=self.milvus_token)
-
-            # 创建数据库（如果不存在）
+        """初始化 Milvus 连接。Proxy 未就绪时重试，避免启动瞬间失败后对话一直找不到知识库。"""
+        retries = 8
+        delay_s = 5
+        last_error: Exception | None = None
+        for attempt in range(1, retries + 1):
             try:
-                if self.milvus_db not in db.list_database():
-                    db.create_database(self.milvus_db)
-                db.using_database(self.milvus_db)
+                if connections.has_connection(self.connection_alias):
+                    connections.disconnect(self.connection_alias)
+                connections.connect(alias=self.connection_alias, uri=self.milvus_uri, token=self.milvus_token)
+
+                try:
+                    using = self.connection_alias
+                    if self.milvus_db not in db.list_database(using=using):
+                        db.create_database(self.milvus_db, using=using)
+                    db.using_database(self.milvus_db, using=using)
+                except Exception as e:
+                    logger.warning(f"Database operation failed, using default: {e}")
+
+                logger.info(f"Connected to Milvus at {self.milvus_uri} (db={self.milvus_db})")
+                return
             except Exception as e:
-                logger.warning(f"Database operation failed, using default: {e}")
+                last_error = e
+                logger.warning(f"Failed to connect to Milvus (attempt {attempt}/{retries}): {e}")
+                if attempt < retries:
+                    time.sleep(delay_s)
 
-            logger.info(f"Connected to Milvus at {self.milvus_uri}")
-
-        except Exception as e:
-            logger.error(f"Failed to connect to Milvus: {e}")
-            raise
+        logger.error(f"Failed to connect to Milvus: {last_error}")
+        if last_error is None:
+            raise RuntimeError("Failed to connect to Milvus")
+        raise last_error
 
     async def _create_kb_instance(self, db_id: str, kb_config: dict) -> Any:
         """创建 Milvus 集合"""

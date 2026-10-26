@@ -12,8 +12,8 @@ services:
       - app-network
     volumes:
       - ./saves:/app/saves
-      # 课本伴读 / 视频伴读：与 dev 一致，挂载主机 knowledgebase（含 books/*.pdf、videos、MinerU 插图目录等）
-      - ./knowledgebase:/app/knowledgebase
+      # 课本/视频等大文件在仓库外。未设置时用仓库同级 yuxi-knowledgebase，并挂到容器内同一路径。
+      - ${KNOWLEDGEBASE_DIR:-../yuxi-knowledgebase}:${KNOWLEDGEBASE_DIR:-/yuxi-knowledgebase}
       # 维护脚本（如 scripts/import_textbook_to_milvus.py）；镜像内未 COPY scripts，需挂载
       - ./scripts:/app/scripts
       # 压测脚本（test/ 未打入生产镜像，需在容器内 exec 时挂载）
@@ -40,6 +40,7 @@ services:
       - MINIO_URI=${MINIO_URI:-http://milvus-minio:9000}
       - MODEL_DIR_IN_DOCKER=/models
       - RUNNING_IN_DOCKER=true
+      - KNOWLEDGEBASE_DIR=${KNOWLEDGEBASE_DIR:-/yuxi-knowledgebase}
       - OPENBLAS_NUM_THREADS=1
       - OMP_NUM_THREADS=1
       - MKL_NUM_THREADS=1

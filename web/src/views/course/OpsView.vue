@@ -9,6 +9,32 @@
         subtitle="统一查看课程平台的用户、对话、做题与反馈数据。"
       />
       <div class="ops-dashboard">
+        <a-card class="roster-card" title="学生实名注册名单">
+          <a-space wrap>
+            <span>当前名单：{{ studentRosterCount }} 人</span>
+            <input
+              ref="rosterFileInput"
+              class="roster-file-input"
+              type="file"
+              accept=".csv,text/csv"
+              @change="handleRosterFileChange"
+            />
+            <a-button @click="rosterFileInput?.click()">选择 CSV</a-button>
+            <span>{{ selectedRosterFile?.name || '未选择文件' }}</span>
+            <a-button
+              type="primary"
+              :disabled="!selectedRosterFile"
+              :loading="loadingRoster"
+              @click="uploadStudentRoster"
+            >
+              导入并替换名单
+            </a-button>
+          </a-space>
+          <p class="roster-hint">
+            CSV 必须为 UTF-8 编码且不超过 5 MB，表头为 <code>student_id,name</code>。导入会整体替换当前名单，不会修改已注册账号。
+          </p>
+        </a-card>
+
         <div class="ops-overview">
           <div class="ops-stat-card">
             <span class="ops-stat-value">{{ basicStats?.total_users ?? '—' }}</span>
@@ -429,6 +455,10 @@ const handleSwitchAccount = () => {
 
 const basicStats = ref({})
 const loadingStats = ref(false)
+const studentRosterCount = ref('—')
+const selectedRosterFile = ref(null)
+const rosterFileInput = ref(null)
+const loadingRoster = ref(false)
 const conversations = ref([])
 const loadingConversations = ref(false)
 const loadingConversationDetail = ref(false)
@@ -613,6 +643,37 @@ const loadStats = async () => {
   }
 }
 
+const loadStudentRosterCount = async () => {
+  try {
+    const response = await dashboardApi.getStudentRosterCount()
+    studentRosterCount.value = response.student_count
+  } catch (error) {
+    console.error('加载学生名单状态失败:', error)
+    message.error('加载学生名单状态失败')
+  }
+}
+
+const handleRosterFileChange = (event) => {
+  selectedRosterFile.value = event.target.files?.[0] || null
+}
+
+const uploadStudentRoster = async () => {
+  if (!selectedRosterFile.value) return
+  loadingRoster.value = true
+  try {
+    const response = await dashboardApi.importStudentRoster(selectedRosterFile.value)
+    studentRosterCount.value = response.student_count
+    selectedRosterFile.value = null
+    if (rosterFileInput.value) rosterFileInput.value.value = ''
+    message.success(`学生名单导入成功，共 ${response.student_count} 人`)
+  } catch (error) {
+    console.error('导入学生名单失败:', error)
+    message.error(error.message || '导入学生名单失败')
+  } finally {
+    loadingRoster.value = false
+  }
+}
+
 const loadConversations = async () => {
   loadingConversations.value = true
   try {
@@ -779,6 +840,7 @@ onMounted(() => {
   initColorPalette()
 
   loadStats()
+  loadStudentRosterCount()
   loadConversations()
   loadExerciseAttempts()
   loadFeedbacks()
@@ -971,6 +1033,16 @@ onMounted(() => {
 
 .ops-table-section {
   min-height: 280px;
+}
+
+.roster-file-input {
+  display: none;
+}
+
+.roster-hint {
+  margin: 12px 0 0;
+  color: var(--gray-600);
+  font-size: 13px;
 }
 
 .exercise-detail {

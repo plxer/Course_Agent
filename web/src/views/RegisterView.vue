@@ -18,7 +18,9 @@
         <div class="register-stage-copy">
           <span class="register-stage-eyebrow">Create Account</span>
           <h1 class="register-stage-title">创建你的课程平台账号</h1>
-          <p class="register-stage-subtitle">统一的学习入口，连接对话、伴读、视频与练习体验。</p>
+          <p class="register-stage-subtitle">
+            使用教师提供名单中的学号注册，注册后用户名将显示为名单中的姓名。
+          </p>
         </div>
 
         <div class="register-card page-card">
@@ -30,20 +32,13 @@
 
             <a-form :model="form" @finish="handleRegister" layout="vertical" class="register-form">
               <a-form-item
-                label="用户名"
-                name="username"
-                :rules="[
-                  { required: true, message: '请输入用户名' },
-                  { min: 2, max: 20, message: '用户名长度为 2–20 个字符' },
-                  {
-                    pattern: /^[一-龥a-zA-Z0-9_]+$/,
-                    message: '仅支持中文、英文、数字和下划线'
-                  }
-                ]"
+                label="学号"
+                name="student_id"
+                :rules="[{ required: true, message: '请输入学号' }]"
               >
-                <a-input v-model:value="form.username" placeholder="2–20 个字符" size="large">
+                <a-input v-model:value="form.student_id" placeholder="请输入已登记的学号" size="large">
                   <template #prefix>
-                    <user-outlined />
+                    <idcard-outlined />
                   </template>
                 </a-input>
               </a-form-item>
@@ -129,7 +124,7 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useInfoStore } from '@/stores/info'
 import { message } from 'ant-design-vue'
-import { UserOutlined, LockOutlined, PhoneOutlined } from '@ant-design/icons-vue'
+import { IdcardOutlined, LockOutlined, PhoneOutlined } from '@ant-design/icons-vue'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -138,7 +133,7 @@ const infoStore = useInfoStore()
 const courseTitle = '天津大学《计算机网络》课程数智化平台'
 
 const form = reactive({
-  username: '',
+  student_id: '',
   password: '',
   confirmPassword: '',
   phone_number: ''
@@ -160,7 +155,7 @@ const handleRegister = async () => {
   loading.value = true
   try {
     await userStore.register({
-      username: form.username.trim(),
+      student_id: form.student_id.trim(),
       password: form.password,
       phone_number: form.phone_number?.trim() || null
     })

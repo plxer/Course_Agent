@@ -149,5 +149,10 @@ class RuntimeConfigMiddleware(AgentMiddleware):
             tavily = get_tavily_search()
             if tavily is not None:
                 selected_tools.append(tavily)
+        else:
+            # 预检索完成后会关掉开关：同时去掉默认工具列表里的 Tavily，避免生成阶段再搜
+            selected_tools = [
+                t for t in selected_tools if "tavily" not in (getattr(t, "name", "") or "").lower()
+            ]
 
         return selected_tools

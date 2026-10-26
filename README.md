@@ -23,7 +23,7 @@
 - **入口与路由**：默认进入 **课程区**（首页重定向至 **`/course`**，登录成功亦默认至此）；提供 **课本伴读、视频、习题、对话、使用指南** 等页面；管理员仍可通过 **知识库 / 图谱 / 智能体管理** 等原有路径维护平台。
 - **后端**：增加 **课程 API**（课本与 PDF、章节信息、伴读与对话流、视频与字幕、习题与错题等），数据落在 PostgreSQL 的课程相关表中。
 - **前端**：课程界面、登录注册等品牌与交互；登录背景可在后台「组织信息」中配置。
-- **课程资源**：**`knowledgebase/books/`** 存放课本 PDF；**`knowledgebase/videos/`** 存放视频及字幕、摘要等；目录根可通过环境变量 **`KNOWLEDGEBASE_DIR`** 配置。
+- **课程资源**：课本 PDF、视频、插图和字幕放在**仓库同级目录 `yuxi-knowledgebase`**（不进 git）。其下 `books/` 为课本，`videos/` 为视频及字幕、摘要。可用环境变量 **`KNOWLEDGEBASE_DIR`** 改成其它绝对路径。
 
 课程能力与 Yuxi-Know 自带的 RAG、知识库、图谱、智能体 **共用同一套服务与中间件**，在此基础上增加面向章节与教材的业务接口与页面。
 
@@ -109,8 +109,8 @@
 
 ## 课程资源目录（简要）
 
-- `knowledgebase/books/`：课程 PDF 课本  
-- `knowledgebase/videos/`：课程视频；字幕、摘要等常见为 JSON。  
+- `yuxi-knowledgebase/books/`：课程 PDF 课本（仓库同级，不进 git）
+- `yuxi-knowledgebase/videos/`：课程视频；字幕、摘要等常见为 JSON。  
 
 ## 快速开始
 

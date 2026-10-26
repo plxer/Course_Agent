@@ -1,4 +1,4 @@
-import { apiAdminGet } from './base'
+import { apiAdminGet, apiAdminPost } from './base'
 
 /**
  * Dashboard API模块
@@ -6,6 +6,14 @@ import { apiAdminGet } from './base'
  */
 
 export const dashboardApi = {
+  getStudentRosterCount: () => apiAdminGet('/api/auth/student-roster'),
+
+  importStudentRoster: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return apiAdminPost('/api/auth/student-roster', formData)
+  },
+
   /**
    * 获取所有对话记录
    * @param {Object} params - 查询参数

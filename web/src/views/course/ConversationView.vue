@@ -57,18 +57,9 @@
                 <button
                   class="conversation-item-delete"
                   type="button"
-                  :disabled="chatList.length === 1 && (chat.messages?.length ?? 0) === 0"
                   @click.stop="deleteChat(chat.id)"
-                  :title="
-                    chatList.length === 1 && (chat.messages?.length ?? 0) === 0
-                      ? '仅剩一个空对话，无法删除'
-                      : '删除对话'
-                  "
-                  :aria-label="
-                    chatList.length === 1 && (chat.messages?.length ?? 0) === 0
-                      ? '仅剩一个空对话，无法删除'
-                      : '删除对话'
-                  "
+                  title="删除对话"
+                  aria-label="删除对话"
                 >
                   <svg
                     class="conversation-item-delete-icon"
@@ -194,7 +185,7 @@
               </div>
               <div class="conversation-view-message-content ai loading">
                 <div v-if="searchSources.length > 0" class="conversation-view-search-sources">
-                  <div class="search-sources-title">信息来源</div>
+                  <div class="search-sources-title">参考来源（共 {{ searchSources.length }} 条）</div>
                   <ul class="search-sources-list">
                     <li v-for="(src, idx) in searchSources" :key="idx" class="search-sources-item">
                       <a :href="src.url" target="_blank" rel="noopener noreferrer">{{
@@ -203,21 +194,19 @@
                     </li>
                   </ul>
                 </div>
+                <div v-if="showSearchSpinner" class="conversation-view-spinner-row">
+                  <span class="conversation-view-spinner-inline" aria-hidden="true"></span>
+                  <span class="conversation-view-spinner-label">搜索中</span>
+                </div>
                 <div
-                  v-if="currentAiMessage"
-                  :key="`loading-${currentAiMessage.length}`"
+                  v-else-if="currentAiMessage"
                   class="conversation-view-message-with-spinner"
                 >
                   <div
                     class="message-text conversation-view-markdown"
                     @click="onMessageContentClick"
-                    v-html="renderMarkdownWithPageLinks(currentAiMessage)"
+                    v-html="renderMarkdownWithPageLinks(stripPageFooterWhileStreaming(currentAiMessage))"
                   />
-                  <!-- 转圈单独一行，避免被遮挡；AI 说出「搜索」或收到 tool_calling 时显示 -->
-                  <div v-if="showSearchSpinner" class="conversation-view-spinner-row">
-                    <span class="conversation-view-spinner-inline" aria-hidden="true"></span>
-                    <span class="conversation-view-spinner-label">搜索中</span>
-                  </div>
                 </div>
                 <div v-else-if="searchSources.length === 0" class="typing-indicator">
                   <span></span>
@@ -303,7 +292,7 @@
 <script setup>
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { marked } from 'marked'
+import { renderCourseMarkdown } from '@/utils/courseMarkdown.js'
 import { message } from 'ant-design-vue'
 import { Image } from 'lucide-vue-next'
 import CourseTopbar from '@/components/course/CourseTopbar.vue'
@@ -410,35 +399,47 @@ watch(enableWebSearch, (val) => {
 })
 
 function renderMarkdown(text) {
-  if (!text || typeof text !== 'string') return ''
-  return marked.parse(text, { gfm: true, breaks: true })
+  return renderCourseMarkdown(text)
 }
 
 /** PDF 页索引 = 课本页码 + 11（封面等占前 11 页） */
 const TEXTBOOK_PAGE_OFFSET = 11
 
-/** 将「对应课本页码：15、16」等裸数字转为 **15** 以便转成可点击的课本页链接 */
-function preprocessTextbookPageLineForMarkdown(text) {
-  if (!text || typeof text !== 'string') return text
-  return text.replace(/(对应课本页码[：:]\s*)(\d+(?:\s*[、，,]\s*\d+)*)/g, (_, label, group) => {
-    const nums = group.match(/\d+/g)
-    if (!nums?.length) return label + group
-    return label + nums.map((n) => `**${n}**`).join('、')
+function stripPageFooterWhileStreaming(text) {
+  const src = text || ''
+  const idx = src.lastIndexOf('对应课本页码')
+  if (idx < 0) return src
+  return src.slice(0, idx).replace(/\s+$/, '')
+}
+
+function makeTextbookPageLink(printed, bookId, from) {
+  const pdfPage = printed + TEXTBOOK_PAGE_OFFSET
+  return `<a href="/reading?book=${encodeURIComponent(bookId)}&page=${pdfPage}&from=${from}" class="conversation-view-page-link" data-book-id="${encodeURIComponent(bookId)}" data-page="${pdfPage}">第${printed}页</a>`
+}
+
+function linkifyDigitsAfterPageLabel(afterHtml, bookId, from) {
+  return afterHtml.replace(/(对应课本页码[：:]\s*)([\s\S]*)/, (_, label, rest) => {
+    const linked = rest.replace(/\d+/g, (n, offset, s) => {
+      const prefix = s.slice(0, offset)
+      if (prefix.lastIndexOf('<') > prefix.lastIndexOf('>')) return n
+      const printed = parseInt(n, 10)
+      if (!printed) return n
+      return makeTextbookPageLink(printed, bookId, from)
+    })
+    return label + linked
   })
 }
 
-/** 渲染 AI 消息：将 **数字**（课本页码）转为链接——文案显示课本页，跳转使用 PDF 页（课本页码 + 11） */
+/** 从最后一次「对应课本页码」起到全文结束，数字都做成跳转；不依赖是否同一行、有多长 */
 function renderMarkdownWithPageLinks(text) {
-  let html = renderMarkdown(preprocessTextbookPageLineForMarkdown(text))
+  if (!text || typeof text !== 'string') return ''
+  let html = renderMarkdown(text)
   if (!html || !textbookPdfBookId.value) return html
   const bookId = textbookPdfBookId.value
-  html = html.replace(/<strong>(\d+)<\/strong>/g, (_, page) => {
-    const printed = parseInt(page, 10)
-    const pdfPage = printed + TEXTBOOK_PAGE_OFFSET
-    return `<a href="/reading?book=${encodeURIComponent(bookId)}&page=${pdfPage}&from=conversation" class="conversation-view-page-link" data-book-id="${encodeURIComponent(bookId)}" data-page="${pdfPage}">第${printed}页</a>`
-  })
-  html = html.replace(/<\/a>\s*页/g, '</a>')
-  return html
+  const idx = html.lastIndexOf('对应课本页码')
+  if (idx < 0) return html
+  const after = linkifyDigitsAfterPageLabel(html.slice(idx), bookId, 'conversation')
+  return html.slice(0, idx) + after.replace(/<\/a>\s*页/g, '</a>')
 }
 
 function onMessageContentClick(e) {
@@ -483,12 +484,7 @@ const searchStatus = computed(() => store.searchStatus)
 const searchQuery = computed(() => store.searchQuery)
 const searchSources = computed(() => store.searchSources)
 /** 是否显示搜索中转圈：仅当 searchStatus 为 searching 时显示，搜索完成(done)后不再显示 */
-const showSearchSpinner = computed(() => {
-  if (store.searchStatus === 'searching') return true
-  if (store.searchStatus === 'done') return false
-  if (store.isLoading && store.currentAiMessage && /搜索/.test(store.currentAiMessage)) return true
-  return false
-})
+const showSearchSpinner = computed(() => store.searchStatus === 'searching')
 
 // 根据首条用户问题 + 首条智能体回答，调用模型生成简短标题并同步到后端
 const summarizeChatTitle = async (chat) => {
@@ -510,40 +506,92 @@ const summarizeChatTitle = async (chat) => {
   }
 }
 
+function collectUrlSources(...lists) {
+  const sources = []
+  const seen = new Set()
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue
+    for (const item of list) {
+      const url = item?.url
+      if (!url || seen.has(url)) continue
+      seen.add(url)
+      sources.push({ title: item.title || url, url })
+    }
+  }
+  return sources
+}
+
+function sourcesFromTavilyToolCalls(toolCalls) {
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) return []
+  const sources = []
+  for (const tc of toolCalls) {
+    const name = (tc.name || tc.function?.name || '').toLowerCase()
+    if (!name.includes('tavily')) continue
+    const resultContent = tc.tool_call_result?.content
+    if (!resultContent) continue
+    let data
+    try {
+      data = typeof resultContent === 'string' ? JSON.parse(resultContent) : resultContent
+    } catch {
+      continue
+    }
+    const results = Array.isArray(data?.results) ? data.results : Array.isArray(data) ? data : []
+    for (const r of results) {
+      if (r?.url) sources.push({ title: r.title || r.url || '', url: r.url })
+    }
+  }
+  return sources
+}
+
+/** 将同一轮里工具调用空消息上的来源，合并到该轮最后一条有正文的回答上 */
+function foldSourcesOntoAnswer(messages) {
+  const out = []
+  let i = 0
+  while (i < messages.length) {
+    const msg = messages[i]
+    if (msg.role !== 'user') {
+      out.push(msg)
+      i += 1
+      continue
+    }
+    out.push(msg)
+    i += 1
+    const turn = []
+    while (i < messages.length && messages[i].role !== 'user') {
+      turn.push(messages[i])
+      i += 1
+    }
+    const sources = collectUrlSources(...turn.map((m) => m.sources))
+    const withContent = turn.filter((m) => m.role !== 'ai' || m.content)
+    const lastAi = [...withContent].reverse().find((m) => m.role === 'ai')
+    if (lastAi && sources.length) lastAi.sources = sources
+    if (!lastAi && sources.length) {
+      out.push({ role: 'ai', content: '', sources })
+    }
+    out.push(...withContent)
+  }
+  return out
+}
+
 // 从后端历史记录格式转为页面使用的 messages（保留 tool_calls，并从网络搜索结果中提取 sources 用于展示链接）
 function historyToMessages(history) {
   if (!Array.isArray(history)) return []
-  return history
+  const mapped = history
     .filter((m) => m.type === 'human' || m.type === 'ai')
     .map((m) => {
       const role = m.type === 'human' ? 'user' : 'ai'
       const base = { role, content: m.content || '' }
       if (role !== 'ai') return base
-      // 从 AI 消息的 tool_calls 中提取网络搜索来源，供「参考来源」展示
       const toolCalls = m.tool_calls
-      if (!Array.isArray(toolCalls) || toolCalls.length === 0) return base
-      const sources = []
-      for (const tc of toolCalls) {
-        const name = (tc.name || tc.function?.name || '').toLowerCase()
-        if (!name.includes('tavily')) continue
-        const resultContent = tc.tool_call_result?.content
-        if (!resultContent) continue
-        let data
-        try {
-          data = typeof resultContent === 'string' ? JSON.parse(resultContent) : resultContent
-        } catch {
-          continue
-        }
-        if (Array.isArray(data.results)) {
-          for (const r of data.results) {
-            if (r?.url) sources.push({ title: r.title || r.url || '', url: r.url })
-          }
-        }
-      }
+      const sources = collectUrlSources(
+        sourcesFromTavilyToolCalls(toolCalls),
+        m.extra_metadata?.search_sources
+      )
       if (sources.length > 0) base.sources = sources
-      if (toolCalls.length > 0) base.tool_calls = toolCalls
+      if (Array.isArray(toolCalls) && toolCalls.length > 0) base.tool_calls = toolCalls
       return base
     })
+  return foldSourcesOntoAnswer(mapped)
 }
 
 // 加载指定 thread 的历史并填入 chat.messages
@@ -638,8 +686,6 @@ const switchChat = async (chatId) => {
 const deleteChat = async (chatId) => {
   const index = store.chatList.findIndex((c) => c.id === chatId)
   if (index === -1) return
-  const chat = store.chatList[index]
-  if (store.chatList.length === 1 && (chat.messages?.length ?? 0) === 0) return
 
   if (userStore.isLoggedIn && store.defaultAgentId) {
     try {
@@ -650,6 +696,11 @@ const deleteChat = async (chatId) => {
   }
 
   store.chatList.splice(index, 1)
+
+  if (store.chatList.length === 0) {
+    await createNewChat()
+    return
+  }
 
   // 仅剩一个对话且该对话未被命名时，改名为「对话1」（未命名 = 无标题或标题为默认「对话 N」；不影响首轮对话总结）
   if (store.chatList.length === 1) {
@@ -667,20 +718,10 @@ const deleteChat = async (chatId) => {
   }
 
   if (store.currentChatId === chatId) {
-    if (store.chatList.length > 0) {
-      // 优先切到“被删除窗口的前一个”
-      // 由于这里已 splice(index, 1)，所以 index-1 对应的是删除前的前一个元素
-      const prevIndex = Math.max(0, index - 1)
-      const prevChat = store.chatList[prevIndex]
-      if (prevChat?.id) {
-        switchChat(prevChat.id)
-      } else {
-        // 理论上不会到这里：chatList.length > 0 且 prevIndex >= 0
-        switchChat(store.chatList[0].id)
-      }
-    } else {
-      await createNewChat()
-    }
+    // 优先切到“被删除窗口的前一个”
+    const prevIndex = Math.max(0, index - 1)
+    const prevChat = store.chatList[prevIndex] || store.chatList[0]
+    if (prevChat?.id) switchChat(prevChat.id)
   }
 }
 
@@ -716,6 +757,8 @@ const sendMessage = async () => {
   store.setLoading(true)
   store.clearCurrentAiMessage()
   store.clearSearchState()
+  const webSearchOn = Boolean(chat.enableWebSearch ?? enableWebSearch.value)
+  if (webSearchOn) store.setSearching(content)
   const controller = new AbortController()
   store.setStreamController(controller)
 
@@ -730,11 +773,13 @@ const sendMessage = async () => {
   /** 后端 400 等错误会先通过 onChunk(status:'error') 展示，再 throw，避免 catch 里重复追加同一条或通用网络提示 */
   let errorAlreadyShown = false
 
-  // 流式缓冲：减少逐字更新 DOM，每 50ms 或结束时批量写入，使输出更流畅
-  const STREAM_FLUSH_MS = 50
+  // 按动画帧合并增量，避免逐 token 重绘；不要用 length 当 key（会拆掉 DOM，看起来一卡一卡）
   let streamTextBuffer = ''
-  let streamFlushTimer = null
+  let heldBeforeSearch = ''
+  let searchReady = !webSearchOn
+  let streamFlushRaf = null
   const flushStreamBuffer = () => {
+    streamFlushRaf = null
     if (streamTextBuffer.length === 0) return
     const convStore = useCourseConversationStore()
     convStore.appendCurrentAiMessage(streamTextBuffer)
@@ -742,11 +787,25 @@ const sendMessage = async () => {
     if (convStore.currentChatId === chatIdForThisRequest) nextTick(() => scrollToBottom())
   }
   const scheduleStreamFlush = () => {
-    if (streamFlushTimer != null) return
-    streamFlushTimer = setTimeout(() => {
-      streamFlushTimer = null
-      flushStreamBuffer()
-    }, STREAM_FLUSH_MS)
+    if (streamFlushRaf != null) return
+    streamFlushRaf = requestAnimationFrame(flushStreamBuffer)
+  }
+  const releaseHeldSearchText = () => {
+    if (!heldBeforeSearch) return
+    streamTextBuffer += heldBeforeSearch
+    heldBeforeSearch = ''
+    scheduleStreamFlush()
+  }
+  const markSearchReady = () => {
+    if (searchReady) return
+    searchReady = true
+    releaseHeldSearchText()
+  }
+  const stopStreamFlush = () => {
+    if (streamFlushRaf != null) {
+      cancelAnimationFrame(streamFlushRaf)
+      streamFlushRaf = null
+    }
   }
 
   try {
@@ -766,15 +825,26 @@ const sendMessage = async () => {
             targetChat.threadId = fromChunk
           }
         } else if (chunk.status === 'loading') {
-          if (chunk.response !== undefined) {
-            if (chunk.response) {
+          if (Array.isArray(chunk.search_sources) && chunk.search_sources.length) {
+            convStore.appendSearchSources(chunk.search_sources)
+            markSearchReady()
+          } else if (chunk.search_status === 'done') {
+            convStore.markSearchDone()
+            markSearchReady()
+          }
+          if (chunk.response) {
+            if (!searchReady) {
+              heldBeforeSearch += chunk.response
+            } else {
               streamTextBuffer += chunk.response
               scheduleStreamFlush()
             }
           }
           if (
             chunk.tool_calling?.name &&
-            String(chunk.tool_calling.name).toLowerCase().includes('tavily')
+            String(chunk.tool_calling.name).toLowerCase().includes('tavily') &&
+            convStore.searchStatus !== 'done' &&
+            !(Array.isArray(chunk.search_sources) && chunk.search_sources.length)
           ) {
             convStore.setSearching(chunk.tool_calling.query || '')
           }
@@ -786,7 +856,7 @@ const sendMessage = async () => {
             const tavilyCall = msg.tool_calls.find((tc) =>
               (tc.name || tc.function?.name || '').toLowerCase().includes('tavily')
             )
-            if (tavilyCall) {
+            if (tavilyCall && convStore.searchStatus !== 'done') {
               let q = ''
               const args = tavilyCall.args ?? tavilyCall.function?.arguments
               if (typeof args === 'string') {
@@ -813,31 +883,46 @@ const sendMessage = async () => {
               if (typeof raw === 'string') {
                 try {
                   const data = JSON.parse(raw)
-                  if (Array.isArray(data.results)) {
-                    list = data.results.map((r) => ({
+                  const results = Array.isArray(data?.results)
+                    ? data.results
+                    : Array.isArray(data)
+                      ? data
+                      : []
+                  list = results
+                    .filter((r) => r?.url)
+                    .map((r) => ({
                       title: r.title || r.url || '',
-                      url: r.url || '#'
+                      url: r.url
                     }))
-                  }
                 } catch (_) {}
+              } else if (raw && typeof raw === 'object') {
+                const results = Array.isArray(raw.results) ? raw.results : Array.isArray(raw) ? raw : []
+                list = results
+                  .filter((r) => r?.url)
+                  .map((r) => ({
+                    title: r.title || r.url || '',
+                    url: r.url
+                  }))
               }
               convStore.appendSearchSources(list)
             }
           }
-          if (convStore.currentChatId === chatIdForThisRequest) nextTick(() => scrollToBottom())
         } else if (chunk.status === 'finished') {
-          if (streamFlushTimer != null) {
-            clearTimeout(streamFlushTimer)
-            streamFlushTimer = null
+          markSearchReady()
+          if (Array.isArray(chunk.search_sources) && chunk.search_sources.length) {
+            convStore.appendSearchSources(chunk.search_sources)
           }
+          stopStreamFlush()
           flushStreamBuffer()
-          if (convStore.currentAiMessage) {
-            const sources = convStore.searchSources.length
-              ? [...convStore.searchSources]
-              : undefined
+          if (typeof chunk.response === 'string' && chunk.response.length) {
+            convStore.clearCurrentAiMessage()
+            convStore.appendCurrentAiMessage(chunk.response)
+          }
+          const sources = convStore.searchSources.length ? [...convStore.searchSources] : undefined
+          if (convStore.currentAiMessage || sources?.length) {
             targetChat.messages.push({
               role: 'ai',
-              content: convStore.currentAiMessage,
+              content: convStore.currentAiMessage || '',
               sources
             })
             if (targetChat.messages.length === 2) summarizeChatTitle(targetChat).catch(() => {})
@@ -849,10 +934,7 @@ const sendMessage = async () => {
           if (convStore.currentChatId === chatIdForThisRequest) nextTick(() => scrollToBottom())
         } else if (chunk.status === 'error') {
           errorAlreadyShown = true
-          if (streamFlushTimer != null) {
-            clearTimeout(streamFlushTimer)
-            streamFlushTimer = null
-          }
+          stopStreamFlush()
           flushStreamBuffer()
           const errMsg =
             chunk.error_message || chunk.message || '抱歉，连接服务器失败，请检查网络或稍后再试。'
@@ -872,10 +954,7 @@ const sendMessage = async () => {
       }
     )
   } catch (error) {
-    if (streamFlushTimer != null) {
-      clearTimeout(streamFlushTimer)
-      streamFlushTimer = null
-    }
+    stopStreamFlush()
     flushStreamBuffer()
     const targetChat = store.findChat(chatIdForThisRequest)
     if (targetChat) {
@@ -1535,12 +1614,19 @@ const scrollToBottom = () => {
   padding: 8px 12px;
 }
 
+.conversation-view-markdown a {
+  color: var(--accent-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
 .conversation-view-markdown .conversation-view-page-link {
   color: var(--accent-primary);
   text-decoration: none;
   font-weight: 600;
   border-bottom: 1px solid var(--accent-primary);
   cursor: pointer;
+  word-break: normal;
 }
 
 .conversation-view-markdown .conversation-view-page-link:hover {

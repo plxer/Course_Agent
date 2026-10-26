@@ -168,6 +168,30 @@ class ConversationRepository:
         result = await self.db.execute(query)
         return list(result.scalars().unique().all())
 
+    async def patch_last_assistant_message(
+        self,
+        thread_id: str,
+        *,
+        content: str | None = None,
+        extra_metadata_patch: dict | None = None,
+    ) -> Message | None:
+        """更新本线程最后一条有正文的助手消息（用于补页码行、写入搜索来源）。"""
+        messages = await self.get_messages_by_thread_id(thread_id)
+        last = next((m for m in reversed(messages) if m.role == "assistant" and (m.content or "").strip()), None)
+        if last is None:
+            last = next((m for m in reversed(messages) if m.role == "assistant"), None)
+        if last is None:
+            return None
+        if content is not None:
+            last.content = content
+        if extra_metadata_patch:
+            meta = dict(last.extra_metadata or {})
+            meta.update(extra_metadata_patch)
+            last.extra_metadata = meta
+        await self.db.commit()
+        await self.db.refresh(last)
+        return last
+
     async def get_messages_by_thread_id(
         self, thread_id: str, limit: int | None = None, offset: int = 0
     ) -> list[Message]:

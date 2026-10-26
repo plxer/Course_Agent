@@ -1037,6 +1037,8 @@ class KnowledgeBase(ABC):
                 }
 
         logger.info(f"Loaded {self.kb_type} metadata from database for {len(self.databases_meta)} databases")
+        self._normalize_metadata_state()
+        self._metadata_loaded = True
 
     async def _save_metadata(self) -> None:
         from src.repositories.evaluation_repository import EvaluationRepository

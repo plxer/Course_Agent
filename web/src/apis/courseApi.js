@@ -89,9 +89,17 @@ export async function courseChatStream(query, threadId = null, onChunk = null, o
   if (onChunk && !gotTerminal) onChunk({ status: 'finished' })
 }
 
+function fetchWithTimeout(url, options = {}, requiresAuth = false, timeoutMs = 20000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  return apiGet(url, { ...options, signal: controller.signal }, requiresAuth).finally(() =>
+    clearTimeout(timer)
+  )
+}
+
 /** 课本列表（可匿名） */
 export function listBooks() {
-  return apiGet('/api/course/books', {}, false)
+  return fetchWithTimeout('/api/course/books')
 }
 
 /** 课本页数 */
@@ -99,9 +107,10 @@ export function getBookPages(bookId) {
   return apiGet(`/api/course/books/${encodeURIComponent(bookId)}/pages`, {}, false)
 }
 
-/** 课本某一页图片 URL */
-export function getBookPageUrl(bookId, pageNum) {
-  return `/api/course/books/${encodeURIComponent(bookId)}/page/${pageNum}`
+/** 课本某一页图片 URL；thumb 时走封面缩略图，避免列表页拉全幅渲染 */
+export function getBookPageUrl(bookId, pageNum, options = {}) {
+  const q = options.thumb ? '?thumb=1' : ''
+  return `/api/course/books/${encodeURIComponent(bookId)}/page/${pageNum}${q}`
 }
 
 /** 课本解析插图列表（_page_*，reader_page = extract_page + 1，与伴读右上角页码一致） */
@@ -141,7 +150,7 @@ export function saveReadingPosition(bookId, page) {
 
 /** 视频列表（按章节） */
 export function listVideos() {
-  return apiGet('/api/course/videos', {}, false)
+  return fetchWithTimeout('/api/course/videos')
 }
 
 /** 视频播放 URL */

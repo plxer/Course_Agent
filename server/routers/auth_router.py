@@ -1,3 +1,5 @@
+import csv
+import io
 import re
 import uuid
 from src.utils import logger
@@ -5,11 +7,11 @@ from src.utils import logger
 from fastapi import APIRouter, Depends, HTTPException, Request, status, UploadFile, File
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.storage.postgres.manager import pg_manager
-from src.storage.postgres.models_business import User, Department
+from src.storage.postgres.models_business import User, Department, StudentRoster
 from src.repositories.user_repository import UserRepository
 from src.repositories.department_repository import DepartmentRepository
 from server.utils.auth_middleware import (
@@ -87,7 +89,7 @@ class InitializeAdmin(BaseModel):
 class RegisterRequest(BaseModel):
     """用户自助注册请求（无需登录）"""
 
-    username: str
+    student_id: str
     password: str
     phone_number: str | None = None
 
@@ -303,10 +305,77 @@ async def initialize_admin(admin_data: InitializeAdmin, db: AsyncSession = Depen
     }
 
 
+# 路由：学生名单导入（管理员）
+@auth.get("/student-roster")
+async def get_student_roster_count(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_admin_user),
+):
+    result = await db.execute(select(func.count()).select_from(StudentRoster))
+    return {"student_count": result.scalar_one()}
+
+
+@auth.post("/student-roster")
+async def import_student_roster(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_admin_user),
+):
+    content = await file.read(5 * 1024 * 1024 + 1)
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="CSV 文件不能超过 5 MB")
+
+    try:
+        text_content = content.decode("utf-8-sig")
+        reader = csv.DictReader(io.StringIO(text_content, newline=""))
+        headers = [header.strip() for header in (reader.fieldnames or [])]
+        if len(headers) != 2 or set(headers) != {"student_id", "name"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="CSV 表头必须包含 student_id,name 两列",
+            )
+        reader.fieldnames = headers
+
+        roster_by_id: dict[str, StudentRoster] = {}
+        for line_number, row in enumerate(reader, start=2):
+            if None in row or set(row) != {"student_id", "name"}:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"CSV 第 {line_number} 行列数不正确",
+                )
+            student_id = (row.get("student_id") or "").strip()
+            name = (row.get("name") or "").strip()
+            if not student_id or len(student_id) > 64 or not name or len(name) > 128:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"CSV 第 {line_number} 行的学号或姓名为空或超出长度限制",
+                )
+            if student_id in roster_by_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"CSV 中学号重复：{student_id}",
+                )
+            roster_by_id[student_id] = StudentRoster(student_id=student_id, name=name)
+            if len(roster_by_id) > 50000:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CSV 最多支持 50000 名学生")
+    except UnicodeDecodeError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CSV 文件必须使用 UTF-8 编码") from e
+    except csv.Error as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"CSV 格式无效：{e}") from e
+
+    if not roster_by_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CSV 中没有学生记录")
+
+    await db.execute(delete(StudentRoster))
+    db.add_all(roster_by_id.values())
+    await db.commit()
+    return {"student_count": len(roster_by_id)}
+
+
 # 路由：用户自助注册（公开，无需登录）
 @auth.post("/register", response_model=Token)
 async def register_user(register_data: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    """新用户注册，注册成功后返回 token 并视为已登录。"""
+    """学生通过已导入名单中的学号注册。"""
     # 系统必须已初始化（至少有一个管理员）
     if await pg_manager.async_check_first_run():
         raise HTTPException(
@@ -314,14 +383,28 @@ async def register_user(register_data: RegisterRequest, db: AsyncSession = Depen
             detail="系统尚未初始化，暂不开放注册",
         )
 
-    # 验证用户名
-    is_valid, error_msg = validate_username(register_data.username)
-    if not is_valid:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
-
     user_repo = UserRepository()
-    if await user_repo.exists_by_username(register_data.username):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名已被使用")
+    student_id = register_data.student_id.strip()
+    if not student_id or len(student_id) > 64:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请输入有效学号")
+
+    roster_result = await db.execute(select(StudentRoster).where(StudentRoster.student_id == student_id))
+    student = roster_result.scalar_one_or_none()
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="学号验证未通过，请检查学号是否填写正确；如确认无误，请联系助教老师核对名单或账号状态。",
+        )
+
+    existing_user = await db.execute(select(User.id).where(User.user_id == student_id))
+    if existing_user.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该学号已注册，请直接登录；如忘记密码，请联系助教老师。",
+        )
+
+    if len(register_data.password) < 6:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="密码至少 6 位")
 
     if register_data.phone_number:
         if not is_valid_phone_number(register_data.phone_number):
@@ -329,8 +412,6 @@ async def register_user(register_data: RegisterRequest, db: AsyncSession = Depen
         if await user_repo.exists_by_phone(register_data.phone_number):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="手机号已被使用")
 
-    existing_user_ids = await user_repo.get_all_user_ids()
-    user_id = generate_unique_user_id(register_data.username, existing_user_ids)
     hashed_password = AuthUtils.hash_password(register_data.password)
 
     dept_repo = DepartmentRepository()
@@ -340,8 +421,8 @@ async def register_user(register_data: RegisterRequest, db: AsyncSession = Depen
 
     new_user = await user_repo.create(
         {
-            "username": register_data.username,
-            "user_id": user_id,
+            "username": student.name,
+            "user_id": student.student_id,
             "phone_number": register_data.phone_number,
             "avatar": None,
             "password_hash": hashed_password,

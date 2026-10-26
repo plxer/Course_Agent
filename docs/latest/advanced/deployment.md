@@ -47,6 +47,18 @@ docker compose -f docker-compose.prod.yml --profile all up -d --build
 - **Web 访问**: `http://localhost` (直接通过 80 端口访问，无需 :5173)
 - **API 健康检查**: `curl http://localhost/api/system/health`
 
+### 4. 导入课堂学生名单
+
+管理员登录后进入运维页面，在“学生实名注册名单”区域上传 UTF-8 编码的 CSV 文件。文件表头必须为 `student_id,name`，例如：
+
+```csv
+student_id,name
+20260001,张同学
+20260002,李同学
+```
+
+导入会整体替换当前注册名单，但不会修改或删除已注册账号。学生使用名单中的学号注册和登录，系统会将名单中的姓名设为用户名；旧账号不会自动关联到学号账号。
+
 ## 维护与更新
 
 ### 更新代码并重新部署

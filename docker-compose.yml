@@ -15,7 +15,8 @@ services:
       - ./test:/app/test
       - ./scripts:/app/scripts
       - ./.env:/app/.env
-      - ./knowledgebase:/app/knowledgebase  # 课本 PDF：knowledgebase/books/*.pdf
+      # 课本/视频等大文件在仓库外。未设置时用仓库同级 yuxi-knowledgebase，并挂到容器内同一路径。
+      - ${KNOWLEDGEBASE_DIR:-../yuxi-knowledgebase}:${KNOWLEDGEBASE_DIR:-/yuxi-knowledgebase}
       - ${MODEL_DIR:-./models}:/models  # 使用默认值处理未定义的环境变量
     ports:
       - "5050:5050"
@@ -47,6 +48,7 @@ services:
       - MINIO_URI=${MINIO_URI:-http://milvus-minio:9000}
       - MODEL_DIR_IN_DOCKER=/models
       - RUNNING_IN_DOCKER=true
+      - KNOWLEDGEBASE_DIR=${KNOWLEDGEBASE_DIR:-/yuxi-knowledgebase}
       # 绑定挂载上 inotify 易使 watchfiles(notify) 崩溃，强制轮询（略增 CPU）
       - WATCHFILES_FORCE_POLLING=1
       # 低配/受限 cgroup：限制 BLAS 线程；禁用 OTel SDK，避免 chromadb 导入时资源探测线程池失败
