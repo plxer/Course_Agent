@@ -10,9 +10,9 @@ from langchain.messages import AIMessage, AIMessageChunk, HumanMessage
 from langgraph.types import Command
 
 from src import config as conf
-from src.config.app import DEFAULT_VISION_MODEL_SPEC
 from src import knowledge_base
 from src.agents import agent_manager
+from src.config.app import DEFAULT_VISION_MODEL_SPEC
 from src.plugins.guard import content_guard
 from src.repositories.agent_config_repository import AgentConfigRepository
 from src.repositories.conversation_repository import ConversationRepository
@@ -36,9 +36,7 @@ def _chunks_to_text(parts) -> str:
 
 
 # 从「对应课本页码」起到该段结束（含换行续写的页码），不限制同一行有多长
-_PAGE_FOOTER_BLOCK_RE = re.compile(
-    r"(?:^|\n)[ \t]*对应课本页码[：:][^\n]*(?:\n[ \t]*[\d、，, \t]+)*"
-)
+_PAGE_FOOTER_BLOCK_RE = re.compile(r"(?:^|\n)[ \t]*对应课本页码[：:][^\n]*(?:\n[ \t]*[\d、，, \t]+)*")
 
 
 def _ensure_textbook_page_footer(text: str, pages: list[int]) -> tuple[str, bool]:
@@ -484,8 +482,7 @@ async def stream_agent_chat(
                 )
             else:
                 web_instruction = (
-                    "\n本对话已开启网络搜索，但本轮检索未返回可用结果。"
-                    "请严格依据课本摘录作答，禁止再调用搜索工具。\n\n"
+                    "\n本对话已开启网络搜索，但本轮检索未返回可用结果。请严格依据课本摘录作答，禁止再调用搜索工具。\n\n"
                 )
         summary_lines_instruction = (
             "3. 正文里不要写页码、不要写「第N页」、不要出现「对应课本页码」。"
@@ -499,19 +496,16 @@ async def stream_agent_chat(
         if course_context and tavily_prompt_block:
             intro = (
                 "以下分别给出课本摘录与网络搜索结果。请先读完两份材料，再综合成一篇完整答案："
-                "概念与原理以课本为准，搜索结果用于补充、对照或举例。\n\n"
-                + page_note
+                "概念与原理以课本为准，搜索结果用于补充、对照或举例。\n\n" + page_note
             )
         elif course_context:
             intro = (
-                "以下是从《计算机网络：自顶向下方法》课本中检索到的相关内容，请严格基于课本摘录作答。\n\n"
-                + page_note
+                "以下是从《计算机网络：自顶向下方法》课本中检索到的相关内容，请严格基于课本摘录作答。\n\n" + page_note
             )
         else:
             intro = "请结合下列信息回答用户问题。\n"
         wrapped_content = (
-            intro
-            + "请你：\n"
+            intro + "请你：\n"
             "1. 先直接回应用户的问题：用自然、连贯的表述解释相关概念或原理；若用户附有图片，先说明图中表达了什么、"
             "各符号或流程的含义，再结合课本说明。不要一上来先列「涉及知识点」或要点清单。\n"
             "2. 主体讲清问题后再写收尾行；中间正文禁止出现「对应课本页码」或页码数字加粗。\n"
@@ -573,22 +567,22 @@ async def stream_agent_chat(
         agent_config = {**agent_config, "enable_web_search": False, "tools": tools}
 
     if image_content:
-        vm = ((getattr(conf, "vision_model", None) or "").strip() or DEFAULT_VISION_MODEL_SPEC)
+        vm = (getattr(conf, "vision_model", None) or "").strip() or DEFAULT_VISION_MODEL_SPEC
         agent_config = {**agent_config, "model": vm}
         logger.info("Multimodal request: using vision model %s", vm)
 
     # 本回合若开启了联网搜索或知识库，注入明确指令，避免模型因上下文已有内容而不调用工具
     tool_use_instruction = ""
-    if agent_config.get("enable_web_search") or (agent_config.get("knowledges") and len(agent_config.get("knowledges", [])) > 0):
+    if agent_config.get("enable_web_search") or (
+        agent_config.get("knowledges") and len(agent_config.get("knowledges", [])) > 0
+    ):
         parts = []
         if agent_config.get("enable_web_search") and not required_search_sources:
             parts.append("联网搜索")
         if agent_config.get("knowledges") and len(agent_config["knowledges"]) > 0:
             parts.append("知识库检索")
         if parts:
-            tool_use_instruction = (
-                f"本回合用户已开启「{'」与「'.join(parts)}」，请在本轮回答中主动使用相应工具获取信息，不要仅依赖对话上文作答。"
-            )
+            tool_use_instruction = f"本回合用户已开启「{'」与「'.join(parts)}」，请在本轮回答中主动使用相应工具获取信息，不要仅依赖对话上文作答。"
 
     input_context = {
         "user_id": user_id,

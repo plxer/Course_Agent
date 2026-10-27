@@ -108,9 +108,7 @@ class RuntimeConfigMiddleware(AgentMiddleware):
             tool_use_instruction = getattr(runtime_context, "tool_use_instruction", "") or ""
             if tool_use_instruction and isinstance(tool_use_instruction, str):
                 extra = f"{extra}\n\n{tool_use_instruction}"
-            new_content = list(request.system_message.content_blocks) + [
-                {"type": "text", "text": extra}
-            ]
+            new_content = list(request.system_message.content_blocks) + [{"type": "text", "text": extra}]
             new_system_message = SystemMessage(content=new_content)
             overrides["system_message"] = new_system_message
 
@@ -151,8 +149,6 @@ class RuntimeConfigMiddleware(AgentMiddleware):
                 selected_tools.append(tavily)
         else:
             # 预检索完成后会关掉开关：同时去掉默认工具列表里的 Tavily，避免生成阶段再搜
-            selected_tools = [
-                t for t in selected_tools if "tavily" not in (getattr(t, "name", "") or "").lower()
-            ]
+            selected_tools = [t for t in selected_tools if "tavily" not in (getattr(t, "name", "") or "").lower()]
 
         return selected_tools

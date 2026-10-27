@@ -84,8 +84,8 @@ def _ensure_langchain_text_splitter_compat():
     sys.modules["langchain.text_splitter"] = text_splitter_mod
 
 
-from src.plugins.document_processor_base import BaseDocumentProcessor, OCRException
-from src.utils import logger
+from src.plugins.document_processor_base import BaseDocumentProcessor, OCRException  # noqa: E402
+from src.utils import logger  # noqa: E402
 
 _SUPPORTED_OCR_VERSIONS = frozenset({"PP-OCRv3", "PP-OCRv4", "PP-OCRv5"})
 
@@ -213,7 +213,7 @@ class PaddleOcrProcessor(BaseDocumentProcessor):
         if os.environ.get("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK") is None:
             os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
         try:
-            import paddle
+            import paddle  # noqa: F401
         except ImportError as e:
             return {
                 "status": "unavailable",

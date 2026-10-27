@@ -279,6 +279,7 @@ async def get_mcp_tools(
                     if inflight is not None:
                         task_to_await = inflight
                     else:
+
                         async def _do_fetch() -> list[Callable[..., Any]]:
                             try:
                                 # Need to fetch from server
@@ -338,7 +339,9 @@ async def get_mcp_tools(
                                     )
                                     return tools
                                 except AssertionError as e:
-                                    logger.warning(f"[assert] Failed to load tools from MCP server '{server_name}': {e}")
+                                    logger.warning(
+                                        f"[assert] Failed to load tools from MCP server '{server_name}': {e}"
+                                    )
                                     return []
                                 except BaseException as e:
                                     if isinstance(e, (KeyboardInterrupt, SystemExit)):

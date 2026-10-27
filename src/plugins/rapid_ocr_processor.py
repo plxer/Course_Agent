@@ -12,8 +12,8 @@ from pathlib import Path
 
 import fitz
 import numpy as np
-from PIL import Image
 import rapidocr_onnxruntime as _rapidocr_pkg
+from PIL import Image
 from rapidocr_onnxruntime import RapidOCR
 
 from src.plugins.document_processor_base import BaseDocumentProcessor, OCRException

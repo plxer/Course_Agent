@@ -1,6 +1,6 @@
 """用户反馈路由"""
 
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -14,8 +14,6 @@ from server.utils.auth_middleware import (
     get_required_user,
 )
 from server.utils.common_utils import log_operation
-from src.repositories.user_repository import UserRepository
-from src.storage.postgres.manager import pg_manager
 from src.storage.postgres.models_business import User, UserFeedback
 from src.utils import logger
 from src.utils.datetime_utils import utc_now_naive

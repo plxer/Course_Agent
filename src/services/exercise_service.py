@@ -63,7 +63,7 @@ async def generate_question(
     根据题型和知识点生成一道题；若提供 chapter/section_id 则结合课本该节内容出题。
     返回 {"content", "correct_answer", "scoring_points": [], "options": []}（单选题含 options），失败抛异常。
     """
-    from src.services.textbook_service import get_textbook_excerpt, get_section_title
+    from src.services.textbook_service import get_section_title, get_textbook_excerpt
 
     textbook_excerpt = ""
     if chapter is not None and str(chapter).strip():
@@ -86,9 +86,7 @@ async def generate_question(
 
 请生成一道题。"""
     else:
-        prompt = (
-            f"题型：{type_label}，知识点：{knowledge_point}\n请生成一道题（可参考《计算机网络：自顶向下方法》）。"
-        )
+        prompt = f"题型：{type_label}，知识点：{knowledge_point}\n请生成一道题（可参考《计算机网络：自顶向下方法》）。"
 
     model = load_chat_model(conf.default_model)
     try:

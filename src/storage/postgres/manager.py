@@ -5,10 +5,10 @@ import json
 import os
 from contextlib import asynccontextmanager
 
-from starlette.exceptions import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
+from starlette.exceptions import HTTPException
 
 from server.utils.singleton import SingletonMeta
 from src.storage.postgres.models_business import Base as BusinessBase
@@ -237,9 +237,7 @@ class PostgresManager(metaclass=SingletonMeta):
         try:
             await asyncio.wait_for(engine.dispose(), timeout=30.0)
         except TimeoutError:
-            logger.warning(
-                "PostgreSQL engine dispose timed out; remaining asyncpg closes may log in the worker"
-            )
+            logger.warning("PostgreSQL engine dispose timed out; remaining asyncpg closes may log in the worker")
         except Exception as e:
             logger.warning("PostgreSQL engine dispose failed: {}", e)
 

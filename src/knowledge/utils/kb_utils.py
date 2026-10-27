@@ -214,9 +214,7 @@ def split_text_into_chunks(text: str, file_id: str, filename: str, params: dict 
                     }
                 )
                 chunk_index += 1
-            logger.debug(
-                f"Successfully split text into {len(chunks)} chunks (page_bold_split=True, by **页码**)"
-            )
+            logger.debug(f"Successfully split text into {len(chunks)} chunks (page_bold_split=True, by **页码**)")
             return chunks
 
     page_anchor_split = bool(params.get("page_anchor_split", False))
@@ -250,9 +248,7 @@ def split_text_into_chunks(text: str, file_id: str, filename: str, params: dict 
             )
             chunk_index += 1
 
-    logger.debug(
-        f"Successfully split text into {len(chunks)} chunks (page_anchor_split={page_anchor_split})"
-    )
+    logger.debug(f"Successfully split text into {len(chunks)} chunks (page_anchor_split={page_anchor_split})")
     return chunks
 
 

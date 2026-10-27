@@ -115,7 +115,7 @@ async def _run(query: str, db_id: str | None, preview_chars: int, list_top: int)
 
     def _traced_get_reranker(model_id, **kwargs):
         reranker_calls.append(str(model_id))
-        print(f"--- 中间环节 3: 重排序大模型入口被调用 ---")
+        print("--- 中间环节 3: 重排序大模型入口被调用 ---")
         print(f"  get_reranker(model_id={model_id!r})")
         return _orig_get_reranker(model_id, **kwargs)
 
