@@ -22,27 +22,38 @@ GENERATE_SYSTEM = """你是一位《计算机网络》课程出题老师。请�
 
 要求：
 1. 题目内容清晰，难度适中，必须基于所给课本内容命题，不要脱离课本编造。
-2. 若是单选题：content 只写题干（不包含选项）；必须输出 options 数组，包含 4 个选项，格式为 ["A. 选项一内容", "B. 选项二内容", "C. 选项三内容", "D. 选项四内容"]；correct_answer 为单字母 "A"/"B"/"C"/"D"。
-3. 若是多选题：content 只写题干；options 同上 4 个选项；必须有至少 2 个正确选项；correct_answer 为逗号分隔的大写字母且按字母序排列，例如 "A,C" 或 "B,C,D"（仅含 A–D）。
-4. 若是简答题：必须设置「得分点」。在输出中列出 scoring_points 数组，每个元素是一条得分要点（关键词或短语），批改时将按是否覆盖这些要点给分。题目和标准答案也要给出。
-5. 若是计算题：给出需计算或推导的题目，correct_answer 写明标准数值或表达式结果（可含简要单位）；以计算过程与结果为主，scoring_points 可为空数组。
+2. 若是单选题：content 只写题干（不包含选项）；必须输出 options 数组，包含 4 个选项。
+   格式为 ["A. 选项一内容", "B. 选项二内容", "C. 选项三内容", "D. 选项四内容"]；
+   correct_answer 为单字母 "A"/"B"/"C"/"D"。
+3. 若是多选题：content 只写题干；options 同上 4 个选项；必须有至少 2 个正确选项。
+   correct_answer 为逗号分隔的大写字母且按字母序排列，例如 "A,C" 或 "B,C,D"（仅含 A–D）。
+4. 若是简答题：必须设置「得分点」。在输出中列出 scoring_points 数组，每个元素是一条得分要点
+   （关键词或短语），批改时将按是否覆盖这些要点给分。题目和标准答案也要给出。
+5. 若是计算题：给出需计算或推导的题目，correct_answer 写明标准数值或表达式结果（可含简要单位）；
+   以计算过程与结果为主，scoring_points 可为空数组。
 
 请严格按以下 JSON 格式输出（不要输出其他内容、不要用 markdown 代码块包裹）：
-单选题：{"question_type":"choice","content":"题干（不含选项）","options":["A. ...","B. ...","C. ...","D. ..."],"correct_answer":"A","scoring_points":[]}
-多选题：{"question_type":"multi_choice","content":"题干（不含选项）","options":["A. ...","B. ...","C. ...","D. ..."],"correct_answer":"A,C","scoring_points":[]}
+单选题：{"question_type":"choice","content":"题干（不含选项）",
+"options":["A. ...","B. ...","C. ...","D. ..."],"correct_answer":"A","scoring_points":[]}
+多选题：{"question_type":"multi_choice","content":"题干（不含选项）",
+"options":["A. ...","B. ...","C. ...","D. ..."],"correct_answer":"A,C","scoring_points":[]}
 简答题：{"question_type":"short_answer","content":"题目正文","correct_answer":"参考答案","scoring_points":["要点1","要点2"]}
 计算题：{"question_type":"calculation","content":"题目正文","correct_answer":"标准结果","scoring_points":[]}
 
-简答题时 scoring_points 必须为非空数组。单选题、多选题的 scoring_points 为空数组。计算题的 scoring_points 可为空数组。"""
+简答题时 scoring_points 必须为非空数组。单选题、多选题的 scoring_points 为空数组。
+计算题的 scoring_points 可为空数组。"""
 
-GRADE_SYSTEM = """你是一位《计算机网络》课程批改老师。根据题目、标准答案、得分点（若有）和用户答案，判断对错并给出详细解析。
+GRADE_SYSTEM = """你是一位《计算机网络》课程批改老师。
+根据题目、标准答案、得分点（若有）和用户答案，判断对错并给出详细解析。
 
 要求：
 1. 单选题：与标准答案一致或等价即为对。
 2. 多选题：将标准答案与用户答案均视为选项字母集合（忽略顺序、大小写）；两者集合完全一致则判对，否则判错。
 3. 简答题：根据 scoring_points 得分点判断。用户答案若覆盖大部分得分点（核心意思正确）则判对，否则判错。
 4. 计算题：用户答案的数值或结论与标准答案在数学上等价或合理近似（考虑单位与有效数字）则判对，否则判错。
-5. 解析必须详细，包含：（1）正确答案是什么；（2）考查的知识点/考点；（3）为什么其他选项错误或常见易错点（若为单选题或多选题）；（4）简要延伸或总结。用中文书写，条理清晰。
+5. 解析必须详细，包含：（1）正确答案是什么；（2）考查的知识点/考点；
+   （3）为什么其他选项错误或常见易错点（若为单选题或多选题）；（4）简要延伸或总结。
+   用中文书写，条理清晰。
 6. 解析内容可使用 Markdown 格式（如 **加粗**、列表等），便于阅读。
 
 请严格按以下 JSON 格式输出（不要输出其他内容、不要用 markdown 代码块包裹）：

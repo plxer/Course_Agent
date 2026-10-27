@@ -81,7 +81,8 @@ async def _run(query: str, db_id: str | None, preview_chars: int, list_top: int)
 
     if resolved_db_id not in milvus_kb.databases_meta:
         logger.error(
-            "db_id=%s 未在 Milvus 元数据中找到（已从 PG 加载 %s 个 Milvus 库）。请核对 MILVUS_TEST_DB_ID 或知识库名称。",
+            "db_id=%s 未在 Milvus 元数据中找到（已从 PG 加载 %s 个 Milvus 库）。"
+            "请核对 MILVUS_TEST_DB_ID 或知识库名称。",
             resolved_db_id,
             len(milvus_kb.databases_meta),
         )
@@ -197,7 +198,10 @@ async def _run(query: str, db_id: str | None, preview_chars: int, list_top: int)
 
     if rerank_path and not reranker_calls:
         print("--- 说明 ---")
-        print("  配置要求重排序，但 get_reranker 未被调用：可能是向量召回为空；或 embedding/检索已失败（见上方 ERROR）。")
+        print(
+            "  配置要求重排序，但 get_reranker 未被调用：可能是向量召回为空；"
+            "或 embedding/检索已失败（见上方 ERROR）。"
+        )
     elif rerank_path and reranker_calls:
         print("--- 结论 ---")
         print("  已调用重排序模型（get_reranker → HTTP 重排 API）。")
@@ -209,7 +213,11 @@ async def _run(query: str, db_id: str | None, preview_chars: int, list_top: int)
 def main() -> None:
     parser = argparse.ArgumentParser(description="Milvus 课程同款检索 + 重排序链路追踪")
     parser.add_argument("--query", default="TCP 三次握手的过程是什么", help="测试查询句")
-    parser.add_argument("--db-id", default=os.environ.get("MILVUS_TEST_DB_ID", ""), help="Milvus 知识库 db_id，默认同名库自动解析")
+    parser.add_argument(
+        "--db-id",
+        default=os.environ.get("MILVUS_TEST_DB_ID", ""),
+        help="Milvus 知识库 db_id，默认同名库自动解析",
+    )
     parser.add_argument(
         "--preview-chars",
         type=int,

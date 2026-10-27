@@ -348,12 +348,14 @@ async def get_mcp_tools(
                                         raise
                                     if _is_connect_timeout_error(e):
                                         logger.warning(
-                                            "MCP 服务器 '%s' 连接超时（外网不可达或防火墙）；可在系统设置中关闭该 MCP 或检查 URL",
+                                            "MCP 服务器 '%s' 连接超时（外网不可达或防火墙）；"
+                                            "可在系统设置中关闭该 MCP 或检查 URL",
                                             server_name,
                                         )
                                         return []
                                     logger.error(
-                                        f"Failed to load tools from MCP server '{server_name}': {e}, traceback: {traceback.format_exc()}"
+                                        f"Failed to load tools from MCP server '{server_name}': {e}, "
+                                        f"traceback: {traceback.format_exc()}"
                                     )
                                     return []
                             finally:

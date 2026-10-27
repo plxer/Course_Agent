@@ -67,7 +67,8 @@ _KNOWLEDGEBASE_DIR = knowledgebase_dir()
 _BOOKS_DIR = _KNOWLEDGEBASE_DIR / "books"
 _VIDEOS_DIR = _KNOWLEDGEBASE_DIR / "videos"
 
-# PDF 课本 id → knowledgebase 下 MinerU 导出目录（含 _page_*_Figure_*.jpeg，文件名内页码与伴读页码差 1：伴读显示页 = 文件名页码 + 1）
+# PDF 课本 id → knowledgebase 下 MinerU 导出目录，包含 _page_*_Figure_*.jpeg。
+# 文件名内页码与伴读页码差 1：伴读显示页 = 文件名页码 + 1。
 _BOOK_FIGURES_SUBDIR_BY_BOOK_ID: dict[str, str] = {
     "ComputerNetworking-TopDown-v8-2021": "ComputerNetworking-TopDown",
 }
@@ -285,7 +286,8 @@ async def generate_conversation_title(
     """根据用户第一个问题和智能体第一个回答，用模型生成一句简短的对话标题。"""
     from langchain_core.messages import HumanMessage, SystemMessage
 
-    prompt = """根据下面用户的第一条问题和助手的第一次回复，生成一句简短的对话标题（不超过20字，不要引号、不要markdown、不要“标题：”等前缀）。只输出标题内容。"""
+    prompt = """根据下面用户的第一条问题和助手的第一次回复，生成一句简短的对话标题（不超过20字，
+不要引号、不要 markdown、不要“标题：”等前缀）。只输出标题内容。"""
     user_content = f"用户问题：{body.first_question[:500]}\n助手回复：{body.first_answer[:500]}"
     model = load_chat_model(conf.fast_model)
     try:
@@ -421,7 +423,10 @@ async def _get_course_knowledge_context(query: str, kb_id: str, current_user) ->
             detail=f"未知的课程知识库 id: {kb_id!r}，请选择有效的课程知识库",
         )
 
-    user_info = {"role": getattr(current_user, "role", None), "department_id": getattr(current_user, "department_id", None)}
+    user_info = {
+        "role": getattr(current_user, "role", None),
+        "department_id": getattr(current_user, "department_id", None),
+    }
     result = await kb_manager.get_databases_by_user(user_info)
     databases = result.get("databases") or []
     milvus_db = next(
@@ -431,7 +436,10 @@ async def _get_course_knowledge_context(query: str, kb_id: str, current_user) ->
     if not milvus_db or not milvus_db.get("db_id"):
         raise HTTPException(
             status_code=503,
-            detail=f"课程知识库「{display_name}」对应的 Milvus 知识库未找到或不可用，请先在知识库管理中创建并导入课本（名称须为「{display_name}」、类型为 Milvus）",
+        detail=(
+            f"课程知识库「{display_name}」对应的 Milvus 知识库未找到或不可用，请先在知识库管理中创建并导入课本"
+            f"（名称须为「{display_name}」、类型为 Milvus）"
+        ),
         )
 
     try:
@@ -1068,7 +1076,10 @@ def list_book_extracted_figures(book_id: str):
 
 
 @course.get("/books/{book_id}/figure")
-def get_book_extracted_figure(book_id: str, name: str = Query(..., description="插图文件名，如 _page_18_Figure_1.jpeg")):
+def get_book_extracted_figure(
+    book_id: str,
+    name: str = Query(..., description="插图文件名，如 _page_18_Figure_1.jpeg"),
+):
     """返回课本解析目录中的单张插图（仅允许 _page_* 白名单文件名）。"""
     if not name or Path(name).name != name or ".." in name:
         raise HTTPException(status_code=400, detail="无效文件名")
@@ -1105,7 +1116,8 @@ class OcrRequest(BaseModel):
 @course.post("/books/ocr")
 def ocr_text_selection(body: OcrRequest):
     """对课本某一页的选区做 OCR，返回识别文本。
-    前端传入的 (x,y,width,height) 为「页面图片」像素坐标，与 GET /books/{id}/page/{num} 返回的图片尺寸一致（Matrix 2x），需转换为 PDF 坐标后裁剪。
+    前端传入的 (x,y,width,height) 为「页面图片」像素坐标，与 GET /books/{id}/page/{num}
+    返回的图片尺寸一致（Matrix 2x），需转换为 PDF 坐标后裁剪。
     """
     if body.page_num < 1:
         raise HTTPException(status_code=400, detail="页码从 1 开始")

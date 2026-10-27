@@ -189,7 +189,10 @@ async def _get_existing_message_ids(conv_repo: ConversationRepository, thread_id
 
 
 def _normalize_tool_call(tc: dict) -> dict:
-    """兼容 LangChain 多种 tool_call 格式：顶层 name/args/id 或 function.name/function.arguments，id 可能在 tool_call_id。"""
+    """兼容 LangChain 多种 tool_call 格式。
+
+    支持顶层 name/args/id 或 function.name/function.arguments，id 也可能在 tool_call_id。
+    """
     if not tc:
         return {}
     name = tc.get("name")
@@ -582,7 +585,10 @@ async def stream_agent_chat(
         if agent_config.get("knowledges") and len(agent_config["knowledges"]) > 0:
             parts.append("知识库检索")
         if parts:
-            tool_use_instruction = f"本回合用户已开启「{'」与「'.join(parts)}」，请在本轮回答中主动使用相应工具获取信息，不要仅依赖对话上文作答。"
+            tool_use_instruction = (
+                f"本回合用户已开启「{'」与「'.join(parts)}」，请在本轮回答中主动使用相应工具获取信息，"
+                "不要仅依赖对话上文作答。"
+            )
 
     input_context = {
         "user_id": user_id,

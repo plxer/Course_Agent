@@ -136,7 +136,8 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         result = await db.execute(select(User).filter(User.phone_number == login_identifier))
         user = result.scalar_one_or_none()
 
-    # 仍找不到时，用显示用户名（注册时填写的「用户名」）查找——与自助注册页一致，避免中文名被转成拼音 user_id 后用户仍用原名登录失败
+    # 仍找不到时，用显示用户名（注册时填写的「用户名」）查找，与自助注册页保持一致。
+    # 避免中文名被转成拼音 user_id 后，用户仍用原名登录失败。
     if not user:
         result = await db.execute(select(User).filter(User.username == login_identifier))
         user = result.scalar_one_or_none()

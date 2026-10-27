@@ -151,7 +151,8 @@ async def get_all_conversations(
             .outerjoin(ConversationStats, Conversation.id == ConversationStats.conversation_id)
             .outerjoin(User, user_join)
         )
-        # 习题推荐出题/批改、相关性判断、课本翻译等为运维 Token 统计写入的伪会话（thread_id 以 course_aux_ 开头），不是用户聊天
+        # 习题推荐出题/批改、相关性判断、课本翻译等会写入运维 Token 统计。
+        # 这些伪会话的 thread_id 以 course_aux_ 开头，不是用户聊天。
         query = query.filter(not_(Conversation.thread_id.startswith("course_aux_")))
 
         # Apply filters（用户筛选：以输入内容开头的用户，匹配 conversation.user_id 或关联的 User.user_id / User.id）
@@ -855,7 +856,10 @@ class TimeSeriesStats(BaseModel):
 
 @dashboard.get("/stats/calls/debug")
 async def get_call_stats_debug(db: AsyncSession = Depends(get_db)):
-    """调试用：返回近14天会话数、AI消息数及 agents 查询的原始行，便于排查调用统计无数据。无需登录（仅聚合统计，无敏感信息）。"""
+    """调试用：返回近 14 天会话数、AI 消息数及 agents 查询的原始行。
+
+    用于排查调用统计无数据。无需登录（仅聚合统计，无敏感信息）。
+    """
     from src.storage.postgres.models_business import Conversation, Message
 
     now = utc_now()
@@ -997,7 +1001,8 @@ async def get_call_timeseries_stats(
                 )
                 query = list(conv_result.all())
                 logger.info(
-                    f"dashboard/calls/timeseries agents: fallback by conversation, query_start_time={query_start_time!s}, rows={len(query)}"
+                    f"dashboard/calls/timeseries agents: fallback by conversation, "
+                    f"query_start_time={query_start_time!s}, rows={len(query)}"
                 )
             else:
                 logger.info(

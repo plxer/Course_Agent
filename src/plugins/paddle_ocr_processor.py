@@ -232,7 +232,8 @@ class PaddleOcrProcessor(BaseDocumentProcessor):
         try:
             if self._ocr is None:
                 _apply_paddle_device(self.use_gpu)
-                # 3.x：伴读选区为小图块，关闭整页文档方向/矫正，避免拉取 UVDoc、doc_ori 等大模型；ocr_version 默认 v4 mobile
+                # 3.x：伴读选区为小图块，关闭整页文档方向/矫正，避免拉取 UVDoc、doc_ori 等大模型。
+                # ocr_version 默认 v4 mobile。
                 self._ocr = PaddleOCR(
                     lang=self.lang,
                     ocr_version=_paddle_ocr_version(),
