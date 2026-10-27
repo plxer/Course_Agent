@@ -151,11 +151,7 @@ async def main():
             logger.error("没有可处理的字幕文件")
             return
     else:
-        caption_files = sorted(
-            p
-            for p in _CAPTION_DIR.glob("*.json")
-            if p.name not in _CAPTION_SKIP_NAMES
-        )
+        caption_files = sorted(p for p in _CAPTION_DIR.glob("*.json") if p.name not in _CAPTION_SKIP_NAMES)
     if not caption_files:
         logger.info("未找到字幕文件: %s", _CAPTION_DIR)
         return

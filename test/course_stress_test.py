@@ -312,11 +312,7 @@ async def amain() -> None:
 
     username, password = _auth_pair()
     timeout = httpx.Timeout(300.0, connect=30.0)
-    max_conn = (
-        args.llm_concurrency + 20
-        if args.llm_only
-        else max(args.static_concurrency, args.llm_concurrency) + 20
-    )
+    max_conn = args.llm_concurrency + 20 if args.llm_only else max(args.static_concurrency, args.llm_concurrency) + 20
     limits = httpx.Limits(max_connections=max_conn)
 
     summaries: list[ScenarioStats] = []
@@ -360,9 +356,7 @@ async def amain() -> None:
 
                 probe_sm = await client.get(f"/api/course/videos/{video_id}/summary")
                 if probe_sm.status_code != 200:
-                    print(
-                        f"提示: /summary 对 video_id={video_id} 返回 {probe_sm.status_code}，跳过该压力场景。"
-                    )
+                    print(f"提示: /summary 对 video_id={video_id} 返回 {probe_sm.status_code}，跳过该压力场景。")
                 else:
                     summaries.append(
                         await run_pool(

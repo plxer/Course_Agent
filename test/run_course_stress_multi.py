@@ -145,10 +145,7 @@ async def amain() -> None:
 
     llm_only = not args.full
     slot = asyncio.Semaphore(args.max_parallel)
-    tasks = [
-        _run_child(login, pw, label, child_argv, llm_only, args.base_url, slot)
-        for login, pw, label in accounts
-    ]
+    tasks = [_run_child(login, pw, label, child_argv, llm_only, args.base_url, slot) for login, pw, label in accounts]
     results = await asyncio.gather(*tasks)
     bad = [code for code, _ in results if code != 0]
     print(f"\n[编排] 共 {len(results)} 个进程，失败 {len(bad)} 个")

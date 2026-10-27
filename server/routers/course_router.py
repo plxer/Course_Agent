@@ -436,10 +436,10 @@ async def _get_course_knowledge_context(query: str, kb_id: str, current_user) ->
     if not milvus_db or not milvus_db.get("db_id"):
         raise HTTPException(
             status_code=503,
-        detail=(
-            f"课程知识库「{display_name}」对应的 Milvus 知识库未找到或不可用，请先在知识库管理中创建并导入课本"
-            f"（名称须为「{display_name}」、类型为 Milvus）"
-        ),
+            detail=(
+                f"课程知识库「{display_name}」对应的 Milvus 知识库未找到或不可用，请先在知识库管理中创建并导入课本"
+                f"（名称须为「{display_name}」、类型为 Milvus）"
+            ),
         )
 
     try:
@@ -822,9 +822,7 @@ async def _classify_course_query_relevance(
             HumanMessage(content=human),
         ]
         resp = await model.ainvoke(msg_list)
-        text = _message_content_to_text(
-            resp.content if hasattr(resp, "content") else resp
-        )
+        text = _message_content_to_text(resp.content if hasattr(resp, "content") else resp)
         if db is not None and stats_user_id is not None:
             inp, outp = extract_usage_from_lc_response(resp)
             await log_course_aux_llm_call(
@@ -906,9 +904,7 @@ async def course_chat_stream(
         config["enable_web_search"] = request.enable_web_search
     # 已校验 kb_id 必选，检索课本并注入（仅图时用宽泛查询词召回课本摘录）
     retrieval_query = q_raw if q_raw else "计算机网络 协议 体系结构 课本"
-    context, book_pages = await _get_course_knowledge_context(
-        retrieval_query, kb_id, current_user
-    )
+    context, book_pages = await _get_course_knowledge_context(retrieval_query, kb_id, current_user)
     if context:
         config["course_knowledge_context"] = context
     if book_pages:
@@ -1407,17 +1403,14 @@ async def _build_exercise_quiz_plan(
 
     eligible_titles = [str(kp.get("title") or "") for kp in eligible_kps]
 
-    q_stats = (
-        select(
-            ExerciseAttempt.knowledge_point,
-            ExerciseAttempt.is_correct,
-            ExerciseAttempt.created_at,
-        )
-        .where(
-            ExerciseAttempt.user_id == current_user.id,
-            ExerciseAttempt.chapter == str(body.chapter),
-            ExerciseAttempt.knowledge_point.in_(eligible_titles),
-        )
+    q_stats = select(
+        ExerciseAttempt.knowledge_point,
+        ExerciseAttempt.is_correct,
+        ExerciseAttempt.created_at,
+    ).where(
+        ExerciseAttempt.user_id == current_user.id,
+        ExerciseAttempt.chapter == str(body.chapter),
+        ExerciseAttempt.knowledge_point.in_(eligible_titles),
     )
     result = await db.execute(q_stats)
     stat_rows = result.all()

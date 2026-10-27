@@ -59,12 +59,7 @@ async def main() -> None:
     db_id: str | None = args.db_id
     if not db_id:
         want_type = (args.kb_type or "").strip().lower()
-        matches = [
-            r
-            for r in rows
-            if r.name == args.name
-            and (not want_type or (r.kb_type or "").lower() == want_type)
-        ]
+        matches = [r for r in rows if r.name == args.name and (not want_type or (r.kb_type or "").lower() == want_type)]
         if not matches:
             logger.error("未找到名称=%r 的知识库%s", args.name, f"（kb_type={want_type!r}）" if want_type else "")
             sys.exit(1)

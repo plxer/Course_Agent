@@ -111,9 +111,7 @@ async def create_feedback(
 
         # 记录操作日志（如果有登录用户）
         if current_user:
-            await log_operation(
-                db, current_user.id, "提交反馈", f"反馈标题: {feedback_data.title}", request
-            )
+            await log_operation(db, current_user.id, "提交反馈", f"反馈标题: {feedback_data.title}", request)
 
         logger.info(f"用户反馈已提交: ID={feedback.id}, 标题={feedback_data.title}")
         return feedback.to_dict()
@@ -177,9 +175,7 @@ async def get_all_feedbacks(
     total = total_result.scalar()
 
     # 执行列表查询
-    result = await db.execute(
-        query.order_by(desc(UserFeedback.created_at)).offset(skip).limit(limit)
-    )
+    result = await db.execute(query.order_by(desc(UserFeedback.created_at)).offset(skip).limit(limit))
     feedbacks = result.scalars().all()
 
     return {
@@ -201,9 +197,7 @@ async def get_feedback_stats(
     # 各状态数量
     status_counts = {}
     for status_value in ["pending", "processing", "resolved", "closed"]:
-        count_result = await db.execute(
-            select(func.count(UserFeedback.id)).where(UserFeedback.status == status_value)
-        )
+        count_result = await db.execute(select(func.count(UserFeedback.id)).where(UserFeedback.status == status_value))
         status_counts[status_value] = count_result.scalar()
 
     return {
@@ -222,9 +216,7 @@ async def get_feedback_detail(
     db: AsyncSession = Depends(get_db),
 ):
     """获取反馈详情（管理员权限）"""
-    result = await db.execute(
-        select(UserFeedback).where(UserFeedback.id == feedback_id)
-    )
+    result = await db.execute(select(UserFeedback).where(UserFeedback.id == feedback_id))
     feedback = result.scalar_one_or_none()
 
     if not feedback:
@@ -245,9 +237,7 @@ async def update_feedback(
     db: AsyncSession = Depends(get_db),
 ):
     """更新反馈状态或回复（管理员权限）"""
-    result = await db.execute(
-        select(UserFeedback).where(UserFeedback.id == feedback_id)
-    )
+    result = await db.execute(select(UserFeedback).where(UserFeedback.id == feedback_id))
     feedback = result.scalar_one_or_none()
 
     if not feedback:
@@ -270,9 +260,7 @@ async def update_feedback(
     await db.refresh(feedback)
 
     # 记录操作日志
-    await log_operation(
-        db, current_user.id, "处理反馈", f"反馈ID: {feedback_id}, 状态: {feedback.status}", request
-    )
+    await log_operation(db, current_user.id, "处理反馈", f"反馈ID: {feedback_id}, 状态: {feedback.status}", request)
 
     return feedback.to_dict()
 
@@ -285,9 +273,7 @@ async def delete_feedback(
     db: AsyncSession = Depends(get_db),
 ):
     """删除反馈（管理员权限）"""
-    result = await db.execute(
-        select(UserFeedback).where(UserFeedback.id == feedback_id)
-    )
+    result = await db.execute(select(UserFeedback).where(UserFeedback.id == feedback_id))
     feedback = result.scalar_one_or_none()
 
     if not feedback:

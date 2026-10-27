@@ -199,8 +199,7 @@ async def _run(query: str, db_id: str | None, preview_chars: int, list_top: int)
     if rerank_path and not reranker_calls:
         print("--- 说明 ---")
         print(
-            "  配置要求重排序，但 get_reranker 未被调用：可能是向量召回为空；"
-            "或 embedding/检索已失败（见上方 ERROR）。"
+            "  配置要求重排序，但 get_reranker 未被调用：可能是向量召回为空；或 embedding/检索已失败（见上方 ERROR）。"
         )
     elif rerank_path and reranker_calls:
         print("--- 结论 ---")
