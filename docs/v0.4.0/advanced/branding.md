@@ -18,7 +18,7 @@ cp src/config/static/info.template.yaml src/config/static/info.local.yaml
 
 上述中提到的 ICON 预设了下面这些，如果需要更多的 ICONS，可以手动从 `lucide-vue-next` 中引入。
 
-<<< @/../web/src/views/HomeView.vue#icon_mapping{js}
+当前版本不再通过 `HomeView.vue` 管理图标预设；需要更多图标时，可从 `lucide-vue-next` 引入。
 
 ### 3. 环境变量配置
 

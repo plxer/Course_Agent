@@ -76,6 +76,7 @@ lint.select = [         # 选择的规则
     "W",
     "UP",
 ]
+lint.ignore = ["E501"]  # 中文文案和提示信息不强制按英文字符宽度拆行
 
 [tool.uv]
 # 排除传递依赖里的 opencv-python（需 libGL），仅用 opencv-python-headless；见 astral-sh/uv#14220
