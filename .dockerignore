@@ -21,3 +21,8 @@ web/node_modules/
 # 忽略 Docker 本身的文件
 Dockerfile
 docker-compose.yml
+
+docker/volumes/
+server/__pycache__/
+**/__pycache__/
+*.py[cod]
