@@ -50,7 +50,7 @@ class Config(BaseModel):
     # 模型配置
     # ============================================================
     default_model: str = Field(
-        default="siliconflow/deepseek-ai/DeepSeek-V3.2",
+        default="tjusai/DeepSeek-V4-Flash",
         description="默认对话模型",
     )
     vision_model: str = Field(

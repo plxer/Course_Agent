@@ -11,6 +11,7 @@
 | DeepSeek                                         | `DEEPSEEK_API_KEY`    | 国产大模型            |
 | OpenRouter                                       | `OPENROUTER_API_KEY`  | 多模型聚合平台        |
 | 智谱清言                                         | `ZHIPUAI_API_KEY`     | GLM 系列模型          |
+| TJUSAI                                           | `TJUSAI_API_KEY`      | DeepSeek-V4-Flash 模型 |
 | 阿里云百炼                                       | `DASHSCOPE_API_KEY`   | 通义千问系列          |
 
 其余还支持火山豆包、Together、vLLM、Ollama 等。
@@ -32,8 +33,10 @@
 系统的默认对话模型可以在设置页面配置，也可以通过配置项 `default_model` 指定，格式统一为 `模型提供商/模型名称`，例如：
 
 ```yaml
-default_model: siliconflow/deepseek-ai/DeepSeek-V3.2
+default_model: tjusai/DeepSeek-V4-Flash
 ```
+
+智能体配置档中已保存的模型优先于系统默认模型。更改 `default_model` 不会覆盖已有配置档；需要在对应智能体配置中更新模型。
 
 ## 自定义模型供应商
 
