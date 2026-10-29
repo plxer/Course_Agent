@@ -69,6 +69,14 @@ DEFAULT_CHAT_MODEL_PROVIDERS: dict[str, ChatModelProvider] = {
         env="ZHIPUAI_API_KEY",
         models=["glm-4.6", "glm-4.5-air", "glm-4.5-flash"],
     ),
+    "tjusai": ChatModelProvider(
+        name="TJUSAI",
+        url="https://tjusai.top",
+        base_url="https://tjusai.top/v1",
+        default="DeepSeek-V4-Flash",
+        env="TJUSAI_API_KEY",
+        models=["DeepSeek-V4-Flash"],
+    ),
     "siliconflow": ChatModelProvider(
         name="SiliconFlow",
         url="https://cloud.siliconflow.cn/models",
