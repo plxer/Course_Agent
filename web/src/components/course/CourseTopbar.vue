@@ -71,6 +71,7 @@ const defaultNavItems = [
   { to: '/reading', label: '课本伴读', match: ['/reading'] },
   { to: '/videos', label: '视频', match: ['/videos'] },
   { to: '/exercises', label: '习题推荐', match: ['/exercises'] },
+  { to: '/learning-analysis', label: '学情分析', match: ['/learning-analysis'], adminOnly: true },
   { to: '/ops', label: '运维', match: ['/ops'], adminOnly: true },
   { to: '/guide', label: '使用指南', match: ['/guide'] }
 ]
@@ -129,7 +130,13 @@ function handleSwitchAccount() {
   border: 1px solid var(--accent-primary);
   border-radius: 50%;
   background:
-    linear-gradient(135deg, transparent 47%, var(--accent-primary) 48%, var(--accent-primary) 54%, transparent 55%),
+    linear-gradient(
+      135deg,
+      transparent 47%,
+      var(--accent-primary) 48%,
+      var(--accent-primary) 54%,
+      transparent 55%
+    ),
     var(--surface-page);
 }
 

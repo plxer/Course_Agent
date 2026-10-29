@@ -13,6 +13,8 @@ export const dashboardApi = {
   getStudentLearningSummary: (userId) =>
     apiAdminGet(`/api/dashboard/students/${userId}/learning-summary`),
 
+  getLearningAnalysis: () => apiAdminGet('/api/dashboard/learning-analysis'),
+
   importStudentRoster: (file) => {
     const formData = new FormData()
     formData.append('file', file)

@@ -4,9 +4,35 @@ Integration tests for dashboard router endpoints.
 
 from __future__ import annotations
 
+from datetime import date, datetime
+
 import pytest
 
+from server.routers.dashboard_router import (
+    _database_datetime_to_shanghai,
+    _shanghai_day_start_as_utc_naive,
+)
+from src.utils.datetime_utils import SHANGHAI_TZ
+
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
+
+
+async def test_database_timestamp_uses_beijing_date_and_hour():
+    stored_timestamp = datetime(2026, 10, 28, 16, 30)
+
+    assert _database_datetime_to_shanghai(stored_timestamp) == datetime(
+        2026, 10, 29, 0, 30, tzinfo=SHANGHAI_TZ
+    )
+    assert _database_datetime_to_shanghai(stored_timestamp).isoformat().endswith("+08:00")
+
+
+async def test_beijing_midnight_maps_to_database_utc_boundary():
+    stored_boundary = _shanghai_day_start_as_utc_naive(date(2026, 10, 29))
+
+    assert stored_boundary == datetime(2026, 10, 28, 16, 0)
+    assert _database_datetime_to_shanghai(stored_boundary) == datetime(
+        2026, 10, 29, 0, 0, tzinfo=SHANGHAI_TZ
+    )
 
 
 async def test_dashboard_requires_authentication(test_client):

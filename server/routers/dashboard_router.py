@@ -7,7 +7,7 @@ Provides centralized dashboard APIs for monitoring system-wide statistics.
 """
 
 import traceback
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,11 +19,21 @@ from server.routers.auth_router import get_admin_user
 from server.utils.auth_middleware import get_db
 from src.repositories.conversation_repository import ConversationRepository
 from src.storage.postgres.models_business import StudentRoster, User
-from src.utils.datetime_utils import UTC, ensure_shanghai, shanghai_now, utc_now
+from src.utils.datetime_utils import SHANGHAI_TZ, UTC, ensure_shanghai, shanghai_now, utc_now
 from src.utils.logging_config import logger
 
 
 dashboard = APIRouter(prefix="/dashboard", tags=["Dashboard"])
+
+
+def _database_datetime_to_shanghai(value: datetime) -> datetime:
+    """Convert a naive UTC timestamp from a database column to Beijing time."""
+    return value.replace(tzinfo=UTC).astimezone(SHANGHAI_TZ)
+
+
+def _shanghai_day_start_as_utc_naive(day: date) -> datetime:
+    """Convert Beijing midnight to the naive UTC value used by database columns."""
+    return datetime.combine(day, datetime.min.time(), tzinfo=SHANGHAI_TZ).astimezone(UTC).replace(tzinfo=None)
 
 
 def _get_time_group_format(column, time_range: str) -> Any:
@@ -378,7 +388,7 @@ async def get_students(
             "id": user_id,
             "user_login": login,
             "student_name": roster_name or username,
-            "last_login": last_login.isoformat() if last_login else None,
+            "last_login": _database_datetime_to_shanghai(last_login).isoformat() if last_login else None,
         }
         for user_id, login, username, roster_name, last_login in result.all()
     ]
@@ -413,8 +423,7 @@ async def get_student_learning_summary(
         not_(Conversation.thread_id.startswith("course_aux_")),
     )
     question_result = await db.execute(
-        select(func.count(Message.id))
-        .where(Message.conversation_id.in_(user_conversation_ids), Message.role == "user")
+        select(func.count(Message.id)).where(Message.conversation_id.in_(user_conversation_ids), Message.role == "user")
     )
     attempt_result = await db.execute(
         select(
@@ -452,7 +461,9 @@ async def get_student_learning_summary(
             "id": student.id,
             "user_login": student.user_id,
             "student_name": roster_name or student.username,
-            "last_login": student.last_login.isoformat() if student.last_login else None,
+            "last_login": _database_datetime_to_shanghai(student.last_login).isoformat()
+            if student.last_login
+            else None,
         },
         "question_count": int(question_result.scalar() or 0),
         "attempt_count": total_attempts,
@@ -463,11 +474,196 @@ async def get_student_learning_summary(
             {"knowledge_point": name or "未分类", "count": int(count)} for name, count in wrong_result.all()
         ],
         "reading_positions": [
-            {"book_id": book_id, "page": page, "updated_at": updated_at.isoformat()}
+            {
+                "book_id": book_id,
+                "page": page,
+                "updated_at": _database_datetime_to_shanghai(updated_at).isoformat(),
+            }
             for book_id, page, updated_at in reading_result.all()
         ],
-        "latest_activity": latest_activity.isoformat() if latest_activity else None,
+        "latest_activity": _database_datetime_to_shanghai(latest_activity).isoformat() if latest_activity else None,
     }
+
+
+@dashboard.get("/learning-analysis")
+async def get_learning_analysis(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_admin_user),
+):
+    """统计学生近30天AI提问与习题情况，以及近14天提问趋势。"""
+    from collections import Counter, defaultdict
+    from src.storage.postgres.models_business import BookReadingPosition, Conversation, ExerciseAttempt, Message
+
+    now = utc_now().astimezone(SHANGHAI_TZ)
+    today = now.date()
+    start_30 = _shanghai_day_start_as_utc_naive(today - timedelta(days=29))
+    trend_start = _shanghai_day_start_as_utc_naive(today - timedelta(days=13))
+    recent_week_start = _shanghai_day_start_as_utc_naive(today - timedelta(days=6))
+    heatmap_start = datetime.combine(today - timedelta(days=6), datetime.min.time(), tzinfo=SHANGHAI_TZ)
+
+    user_join = or_(Conversation.user_id == User.user_id, Conversation.user_id == cast(User.id, String))
+    message_result = await db.execute(
+        select(User.id, Message.created_at, Conversation.id)
+        .select_from(Message)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .join(User, user_join)
+        .where(
+            User.role == "user",
+            User.is_deleted == 0,
+            Message.role == "user",
+            Message.created_at >= start_30,
+            not_(Conversation.thread_id.startswith("course_aux_")),
+        )
+    )
+    messages = message_result.all()
+
+    trend_counts = Counter()
+    recent_student_questions = Counter()
+    active_user_ids = set()
+    heatmap_activity = defaultdict(lambda: {"students": set(), "events": 0})
+    questioned_conversations = set()
+    for student_id, created_at, conversation_id in messages:
+        local_created_at = _database_datetime_to_shanghai(created_at)
+        event_day = local_created_at.date()
+        active_user_ids.add(student_id)
+        questioned_conversations.add(conversation_id)
+        if event_day >= trend_start.date():
+            trend_counts[event_day] += 1
+        if event_day >= recent_week_start.date():
+            recent_student_questions[student_id] += 1
+        if local_created_at >= heatmap_start:
+            bucket = heatmap_activity[(event_day, local_created_at.hour // 4 * 4)]
+            bucket["students"].add(student_id)
+            bucket["events"] += 1
+
+    attempt_result = await db.execute(
+        select(User.id, ExerciseAttempt.is_correct, ExerciseAttempt.knowledge_point, ExerciseAttempt.created_at)
+        .select_from(ExerciseAttempt)
+        .join(User, ExerciseAttempt.user_id == User.id)
+        .where(
+            User.role == "user",
+            User.is_deleted == 0,
+            ExerciseAttempt.created_at >= start_30,
+        )
+    )
+    attempts = attempt_result.all()
+    point_stats = defaultdict(lambda: {"attempts": 0, "wrong": 0})
+    correct_count = 0
+    for student_id, is_correct, knowledge_point, created_at in attempts:
+        local_created_at = _database_datetime_to_shanghai(created_at)
+        active_user_ids.add(student_id)
+        correct_count += int(is_correct == 1)
+        point = (knowledge_point or "未记录知识点").strip() or "未记录知识点"
+        point_stats[point]["attempts"] += 1
+        point_stats[point]["wrong"] += int(is_correct == 0)
+        if local_created_at >= heatmap_start:
+            bucket = heatmap_activity[(local_created_at.date(), local_created_at.hour // 4 * 4)]
+            bucket["students"].add(student_id)
+            bucket["events"] += 1
+
+    reading_result = await db.execute(
+        select(BookReadingPosition.user_id, BookReadingPosition.updated_at)
+        .join(User, BookReadingPosition.user_id == User.id)
+        .where(User.role == "user", User.is_deleted == 0, BookReadingPosition.updated_at >= start_30)
+    )
+    reading_rows = reading_result.all()
+    for student_id, updated_at in reading_rows:
+        local_updated_at = _database_datetime_to_shanghai(updated_at)
+        active_user_ids.add(student_id)
+        if local_updated_at >= heatmap_start:
+            bucket = heatmap_activity[(local_updated_at.date(), local_updated_at.hour // 4 * 4)]
+            bucket["students"].add(student_id)
+            bucket["events"] += 1
+
+    total_questions = sum(1 for row in messages)
+    total_attempts = len(attempts)
+    students_with_wrong = len({student_id for student_id, correct, _, _ in attempts if correct == 0})
+    frequency_bins = [
+        (0, 0, "0次"),
+        (1, 5, "1–5次"),
+        (6, 10, "6–10次"),
+        (11, 20, "11–20次"),
+        (21, None, "20次以上"),
+    ]
+    frequency = []
+    all_student_result = await db.execute(select(func.count(User.id)).where(User.role == "user", User.is_deleted == 0))
+    student_count = int(all_student_result.scalar() or 0)
+    for lower, upper, label in frequency_bins:
+        if lower == 0:
+            count = student_count - len(recent_student_questions)
+        else:
+            count = sum(
+                1 for value in recent_student_questions.values() if value >= lower and (upper is None or value <= upper)
+            )
+        frequency.append({"range": label, "students": max(0, count)})
+
+    trend = []
+    for offset in range(13, -1, -1):
+        event_day = today - timedelta(days=offset)
+        trend.append(
+            {
+                "day": 13 - offset if offset > 6 else 6 - offset,
+                "date": event_day.isoformat(),
+                "period": "previous" if offset > 6 else "recent",
+                "questions": trend_counts[event_day],
+            }
+        )
+
+    week_days = [today - timedelta(days=offset) for offset in range(6, -1, -1)]
+    weekday_names = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+    heatmap_days = [
+        {"date": event_day.isoformat(), "label": "今天" if event_day == today else weekday_names[event_day.weekday()]}
+        for event_day in week_days
+    ]
+    heatmap_slots = []
+    for start_hour in range(20, -1, -4):
+        heatmap_slots.append(
+            {
+                "start_hour": start_hour,
+                "end_hour": start_hour + 4,
+                "label": f"{start_hour:02d}:00–{start_hour + 4:02d}:00",
+                "cells": [
+                    {
+                        "date": event_day.isoformat(),
+                        "active_students": len(heatmap_activity[(event_day, start_hour)]["students"]),
+                        "activity_count": heatmap_activity[(event_day, start_hour)]["events"],
+                    }
+                    for event_day in week_days
+                ],
+            }
+        )
+
+    return {
+        "period_days": 30,
+        "active_students": len(active_user_ids),
+        "student_count": student_count,
+        "question_count": total_questions,
+        "conversation_count": len(questioned_conversations),
+        "participating_students": len({row[0] for row in messages}),
+        "average_questions_per_student": round(total_questions / len({row[0] for row in messages}), 2)
+        if messages
+        else 0,
+        "trend_14_days": trend,
+        "frequency_7_days": frequency,
+        "activity_heatmap": {"days": heatmap_days, "slots": heatmap_slots},
+        "exercise": {
+            "attempt_count": total_attempts,
+            "wrong_count": total_attempts - correct_count,
+            "accuracy": round(correct_count / total_attempts, 4) if total_attempts else None,
+            "students_with_wrong": students_with_wrong,
+            "knowledge_points": [
+                {
+                    "knowledge_point": name,
+                    "attempt_count": values["attempts"],
+                    "wrong_count": values["wrong"],
+                    "accuracy": round((values["attempts"] - values["wrong"]) / values["attempts"], 4),
+                }
+                for name, values in sorted(point_stats.items(), key=lambda item: item[1]["wrong"], reverse=True)
+            ],
+        },
+    }
+
+
 # =============================================================================
 # 用户活动统计（管理员权限）
 # =============================================================================
