@@ -110,7 +110,7 @@
                   </template>
                   <template v-if="column.key === 'user_display'">
                     <span class="user-display">{{
-                      record.user_login || record.user_id || '—'
+                      record.student_name || record.user_login || record.user_id || '—'
                     }}</span>
                   </template>
                   <template v-if="column.key === 'status'">
@@ -199,8 +199,10 @@
                   </div>
                 </template>
                 <template #bodyCell="{ column, record }">
-                  <template v-if="column.key === 'user_login'">
-                    <span class="user-display">{{ record.user_login }}</span>
+                  <template v-if="column.key === 'student_name'">
+                    <span class="user-display">{{
+                      record.student_name || record.user_login || '—'
+                    }}</span>
                   </template>
                   <template v-if="column.key === 'is_correct'">
                     <a-tag :color="record.is_correct ? 'green' : 'red'" size="small">{{
@@ -383,7 +385,10 @@
           <div class="feedback-detail-item">
             <span class="detail-label">用户</span>
             <span class="detail-value">{{
-              conversationDetail.user_login || conversationDetail.user_id || '—'
+              conversationDetail.student_name ||
+              conversationDetail.user_login ||
+              conversationDetail.user_id ||
+              '—'
             }}</span>
           </div>
           <div class="feedback-detail-item">
@@ -524,7 +529,7 @@ const conversationColumns = [
 ]
 
 const exerciseColumns = [
-  { title: '用户', dataIndex: 'user_login', key: 'user_login', width: 90, ellipsis: true },
+  { title: '用户', dataIndex: 'student_name', key: 'student_name', width: 90, ellipsis: true },
   { title: '题型', dataIndex: 'question_type', key: 'question_type', width: 80 },
   { title: '知识点', dataIndex: 'knowledge_point', key: 'knowledge_point', ellipsis: true },
   { title: '对/错', dataIndex: 'is_correct', key: 'is_correct', width: 64, align: 'center' },

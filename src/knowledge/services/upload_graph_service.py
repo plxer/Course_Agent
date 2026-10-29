@@ -638,9 +638,8 @@ class UploadGraphService:
         def query_by_vector(tx, text, threshold):
             # 首先检查索引是否存在
             if not _index_exists(tx, "entityEmbeddings"):
-                raise Exception(
-                    "向量索引不存在，请先创建索引，或当前图谱中未上传任何三元组（知识库中自动构建的，不会在此处展示和检索）。"
-                )
+                logger.warning("Neo4j vector index entityEmbeddings is missing; using fuzzy matching only")
+                return []
 
             embedding = self.get_embedding(text)
             result = tx.run(

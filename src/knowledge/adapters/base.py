@@ -244,52 +244,22 @@ class BaseNeo4jAdapter:
 
     def _get_sample_nodes_with_connections(self, num: int = 50, label_filter: str = None) -> dict[str, list]:
         """
-        获取连通的节点子图，优先返回连通的节点
+        获取节点及其连通子图
         Args:
             num: 返回的节点数量
             label_filter: 节点标签过滤器 (例如: "kb_123")
         """
-        if not self._is_connected():
-            raise Exception("Neo4j connection is not available")
-
+        driver = self.driver
         label_clause = f":{label_filter}" if label_filter else ""
 
         def query(tx, num):
-            # 连通子图查询
             query_str = f"""
-                // 获取高度数节点作为种子节点
-                MATCH (seed{label_clause})
-                WITH seed, COUNT{{(seed)-[]->()}} + COUNT{{(seed)<-[]-()}} as degree
-                WHERE degree > 0
-                ORDER BY degree DESC
-                LIMIT 5
-
-                // 为每个种子节点收集更多邻居节点
-                UNWIND seed as s
-                MATCH (s)-[*1..1]-(neighbor{label_clause})
-                WITH s, neighbor, COUNT{{(s)-[]->()}} + COUNT{{(s)<-[]-()}} as s_degree
-                WITH s, s_degree, collect(DISTINCT neighbor) as neighbors
-                WITH s, s_degree, neighbors[0..toInteger($num * 0.15)] as limited_neighbors
-
-                // 从邻居节点扩展到二跳节点
-                UNWIND limited_neighbors as neighbor
-                OPTIONAL MATCH (neighbor)-[*1..1]-(second_hop{label_clause})
-                WHERE second_hop <> s
-                WITH s, limited_neighbors, neighbor, collect(DISTINCT second_hop)[0..5] as second_hops
-
-                // 收集所有连通节点
-                WITH collect(DISTINCT s) as seeds,
-                    collect(DISTINCT neighbor) as first_hop_nodes,
-                    reduce(acc = [], x IN collect(second_hops) | acc + x) as second_hop_nodes
-                WITH seeds + first_hop_nodes + second_hop_nodes as connected_nodes
-
-                // 确保不会超过请求的节点数量
-                WITH connected_nodes[0..$num] as final_nodes
-
-                // 获取这些节点之间的关系，避免双向边
-                UNWIND final_nodes as n
-                OPTIONAL MATCH (n)-[rel]-(m)
-                WHERE m IN final_nodes AND elementId(n) < elementId(m)
+                MATCH (n{label_clause})
+                WITH n LIMIT $num
+                WITH collect(n) AS nodes
+                UNWIND nodes AS n
+                OPTIONAL MATCH (n)-[rel]-(m{label_clause})
+                WHERE m IN nodes AND elementId(n) < elementId(m)
                 RETURN
                     {{id: elementId(n), name: n.name, properties: properties(n)}} AS h,
                     CASE WHEN rel IS NOT NULL THEN
@@ -306,84 +276,32 @@ class BaseNeo4jAdapter:
                     ELSE null END AS t
             """
 
-            try:
-                results = tx.run(query_str, num=int(num))
-                formatted_results = {"nodes": [], "edges": []}
-                node_ids = set()
+            results = tx.run(query_str, num=int(num))
+            formatted_results = {"nodes": [], "edges": []}
+            node_ids = set()
+            edge_ids = set()
 
-                for item in results:
-                    h_node = self._process_record_props(item["h"])
-                    if h_node and h_node["id"] not in node_ids:
-                        formatted_results["nodes"].append(h_node)
-                        node_ids.add(h_node["id"])
+            for item in results:
+                h_node = self._process_record_props(item["h"])
+                if h_node and h_node["id"] not in node_ids:
+                    formatted_results["nodes"].append(h_node)
+                    node_ids.add(h_node["id"])
 
-                    if item["r"] is not None and item["t"] is not None:
-                        t_node = self._process_record_props(item["t"])
-                        r_edge = self._process_record_props(item["r"])
-
-                        if t_node and t_node["id"] not in node_ids:
-                            formatted_results["nodes"].append(t_node)
-                            node_ids.add(t_node["id"])
-
-                        if r_edge:
-                            formatted_results["edges"].append(r_edge)
-
-                # 如果节点数不足，补充更多节点
-                if len(formatted_results["nodes"]) < num:
-                    remaining_count = num - len(formatted_results["nodes"])
-                    supplement_query = f"""
-                    MATCH (n{label_clause})
-                    WHERE NOT elementId(n) IN $existing_ids
-                    RETURN {{id: elementId(n), name: n.name, properties: properties(n)}} AS node
-                    LIMIT $count
-                    """
-                    supplement_results = tx.run(supplement_query, existing_ids=list(node_ids), count=remaining_count)
-                    for item in supplement_results:
-                        node = self._process_record_props(item["node"])
-                        if node:
-                            formatted_results["nodes"].append(node)
-
-                return formatted_results
-
-            except Exception as e:
-                logger.warning(f"Connected subgraph query failed, using fallback: {e}")
-                # 简单的备选查询
-                fallback_query = f"""
-                MATCH (n{label_clause})-[r]-(m{label_clause})
-                WHERE elementId(n) < elementId(m)
-                RETURN
-                    {{id: elementId(n), name: n.name, properties: properties(n)}} AS h,
-                    {{
-                        id: elementId(r),
-                        type: r.type,
-                        source_id: elementId(startNode(r)),
-                        target_id: elementId(endNode(r)),
-                        properties: properties(r)
-                    }} AS r,
-                    {{id: elementId(m), name: m.name, properties: properties(m)}} AS t
-                LIMIT $num
-                """
-                results = tx.run(fallback_query, num=int(num))
-                formatted_results = {"nodes": [], "edges": []}
-                node_ids = set()
-
-                for item in results:
-                    h_node = self._process_record_props(item["h"])
+                if item["r"] is not None and item["t"] is not None:
                     t_node = self._process_record_props(item["t"])
                     r_edge = self._process_record_props(item["r"])
 
-                    if h_node and h_node["id"] not in node_ids:
-                        formatted_results["nodes"].append(h_node)
-                        node_ids.add(h_node["id"])
                     if t_node and t_node["id"] not in node_ids:
                         formatted_results["nodes"].append(t_node)
                         node_ids.add(t_node["id"])
-                    if r_edge:
+
+                    if r_edge and r_edge["id"] not in edge_ids:
                         formatted_results["edges"].append(r_edge)
+                        edge_ids.add(r_edge["id"])
 
-                return formatted_results
+            return formatted_results
 
-        with self.driver.session() as session:
+        with driver.session() as session:
             return session.execute_read(query, num)
 
     def _get_graph_stats(self, label_filter: str = None) -> dict[str, Any]:

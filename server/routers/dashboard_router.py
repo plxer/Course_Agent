@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.routers.auth_router import get_admin_user
 from server.utils.auth_middleware import get_db
 from src.repositories.conversation_repository import ConversationRepository
-from src.storage.postgres.models_business import User
+from src.storage.postgres.models_business import StudentRoster, User
 from src.utils.datetime_utils import UTC, ensure_shanghai, shanghai_now, utc_now
 from src.utils.logging_config import logger
 
@@ -98,6 +98,7 @@ class ConversationListItem(BaseModel):
     thread_id: str
     user_id: str
     user_login: str | None = None  # 用户登录名，便于运维展示
+    student_name: str | None = None
     agent_id: str
     title: str
     status: str
@@ -112,6 +113,7 @@ class ConversationDetailResponse(BaseModel):
     thread_id: str
     user_id: str
     user_login: str | None = None
+    student_name: str | None = None
     agent_id: str
     title: str
     status: str
@@ -138,18 +140,19 @@ async def get_all_conversations(
     current_user: User = Depends(get_admin_user),
 ):
     """获取所有对话（管理员权限）"""
-    from src.storage.postgres.models_business import Conversation, ConversationStats, User
+    from src.storage.postgres.models_business import Conversation, ConversationStats
 
     try:
-        # 与 User 表关联，便于展示登录名（Conversation.user_id 可能存的是 User.id 或 User.user_id）
+        # Conversation.user_id 可能存的是 User.id 或 User.user_id
         user_join = or_(
             Conversation.user_id == User.user_id,
             Conversation.user_id == cast(User.id, String),
         )
         query = (
-            select(Conversation, ConversationStats, User)
+            select(Conversation, ConversationStats, User, StudentRoster.name)
             .outerjoin(ConversationStats, Conversation.id == ConversationStats.conversation_id)
             .outerjoin(User, user_join)
+            .outerjoin(StudentRoster, StudentRoster.student_id == User.user_id)
         )
         # 习题推荐出题/批改、相关性判断、课本翻译等会写入运维 Token 统计。
         # 这些伪会话的 thread_id 以 course_aux_ 开头，不是用户聊天。
@@ -181,6 +184,7 @@ async def get_all_conversations(
                 "thread_id": conv.thread_id,
                 "user_id": conv.user_id,
                 "user_login": u.user_id if u else None,
+                "student_name": (student_name or u.username) if u else None,
                 "agent_id": conv.agent_id,
                 "title": conv.title,
                 "status": conv.status,
@@ -188,7 +192,7 @@ async def get_all_conversations(
                 "created_at": conv.created_at.isoformat(),
                 "updated_at": conv.updated_at.isoformat(),
             }
-            for conv, stats, u in results
+            for conv, stats, u, student_name in results
         ]
     except Exception as e:
         logger.error(f"Error getting conversations: {e}")
@@ -203,8 +207,6 @@ async def get_conversation_detail(
     current_user: User = Depends(get_admin_user),
 ):
     """获取指定对话详情（管理员权限）"""
-    from src.storage.postgres.models_business import User
-
     try:
         conv_manager = ConversationRepository(db)
         conversation = await conv_manager.get_conversation_by_thread_id(thread_id)
@@ -212,17 +214,34 @@ async def get_conversation_detail(
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
-        # 解析用户登录名：Conversation.user_id 可能存 User.id 或 User.user_id
+        # Conversation.user_id 可能存 User.id 或 User.user_id
         user_login = None
-        by_login = await db.execute(select(User).where(User.user_id == conversation.user_id))
-        u = by_login.scalar_one_or_none()
+        student_name = None
+        by_login = await db.execute(
+            select(User, StudentRoster.name)
+            .outerjoin(StudentRoster, StudentRoster.student_id == User.user_id)
+            .where(User.user_id == conversation.user_id)
+        )
+        user_row = by_login.one_or_none()
+        u = user_row[0] if user_row else None
+        if user_row:
+            student_name = user_row[1]
         if u:
             user_login = u.user_id
         else:
-            by_id = await db.execute(select(User).where(cast(User.id, String) == conversation.user_id))
-            u = by_id.scalar_one_or_none()
+            by_id = await db.execute(
+                select(User, StudentRoster.name)
+                .outerjoin(StudentRoster, StudentRoster.student_id == User.user_id)
+                .where(cast(User.id, String) == conversation.user_id)
+            )
+            user_row = by_id.one_or_none()
+            u = user_row[0] if user_row else None
+            if user_row:
+                student_name = user_row[1]
             if u:
                 user_login = u.user_id
+        if u:
+            student_name = student_name or u.username
 
         # Get messages and stats
         messages = await conv_manager.get_messages(conversation.id)
@@ -258,6 +277,7 @@ async def get_conversation_detail(
             "thread_id": conversation.thread_id,
             "user_id": conversation.user_id,
             "user_login": user_login,
+            "student_name": student_name,
             "agent_id": conversation.agent_id,
             "title": conversation.title,
             "status": conversation.status,
@@ -280,6 +300,7 @@ class ExerciseAttemptListItem(BaseModel):
 
     id: int
     user_login: str
+    student_name: str | None = None
     question_type: str
     knowledge_point: str
     is_correct: int
@@ -305,8 +326,9 @@ async def get_exercise_attempts(
 
     try:
         query = (
-            select(ExerciseAttempt, User.user_id)
+            select(ExerciseAttempt, User.user_id, StudentRoster.name, User.username)
             .join(User, ExerciseAttempt.user_id == User.id)
+            .outerjoin(StudentRoster, StudentRoster.student_id == User.user_id)
             .order_by(ExerciseAttempt.created_at.desc())
             .limit(limit)
             .offset(offset)
@@ -319,6 +341,7 @@ async def get_exercise_attempts(
             {
                 "id": att.id,
                 "user_login": login or str(att.user_id),
+                "student_name": student_name or username,
                 "question_type": att.question_type,
                 "knowledge_point": att.knowledge_point,
                 "is_correct": att.is_correct,
@@ -330,7 +353,7 @@ async def get_exercise_attempts(
                 "chapter": getattr(att, "chapter", None),
                 "section_title": getattr(att, "section_title", None),
             }
-            for att, login in rows
+            for att, login, student_name, username in rows
         ]
     except Exception as e:
         logger.error(f"Error getting exercise attempts: {e}")
