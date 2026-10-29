@@ -361,6 +361,113 @@ async def get_exercise_attempts(
         raise HTTPException(status_code=500, detail=f"Failed to get exercise attempts: {str(e)}")
 
 
+@dashboard.get("/students")
+async def get_students(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_admin_user),
+):
+    """列出可查看学情的学生账号。"""
+    result = await db.execute(
+        select(User.id, User.user_id, User.username, StudentRoster.name, User.last_login)
+        .outerjoin(StudentRoster, StudentRoster.student_id == User.user_id)
+        .where(User.role == "user", User.is_deleted == 0)
+        .order_by(StudentRoster.name, User.user_id)
+    )
+    return [
+        {
+            "id": user_id,
+            "user_login": login,
+            "student_name": roster_name or username,
+            "last_login": last_login.isoformat() if last_login else None,
+        }
+        for user_id, login, username, roster_name, last_login in result.all()
+    ]
+
+
+@dashboard.get("/students/{user_id}/learning-summary")
+async def get_student_learning_summary(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_admin_user),
+):
+    """汇总单个学生的提问、作答、错题、阅读位置和最近活动。"""
+    from src.storage.postgres.models_business import (
+        BookReadingPosition,
+        Conversation,
+        ExerciseAttempt,
+        Message,
+    )
+
+    student_result = await db.execute(
+        select(User, StudentRoster.name)
+        .outerjoin(StudentRoster, StudentRoster.student_id == User.user_id)
+        .where(User.id == user_id, User.role == "user", User.is_deleted == 0)
+    )
+    student_row = student_result.one_or_none()
+    if not student_row:
+        raise HTTPException(status_code=404, detail="Student not found")
+    student, roster_name = student_row
+
+    user_conversation_ids = select(Conversation.id).where(
+        or_(Conversation.user_id == student.user_id, Conversation.user_id == str(student.id)),
+        not_(Conversation.thread_id.startswith("course_aux_")),
+    )
+    question_result = await db.execute(
+        select(func.count(Message.id))
+        .where(Message.conversation_id.in_(user_conversation_ids), Message.role == "user")
+    )
+    attempt_result = await db.execute(
+        select(
+            func.count(ExerciseAttempt.id),
+            func.sum(ExerciseAttempt.is_correct),
+            func.max(ExerciseAttempt.created_at),
+        ).where(ExerciseAttempt.user_id == student.id)
+    )
+    attempt_count, correct_count, latest_attempt = attempt_result.one()
+    wrong_result = await db.execute(
+        select(ExerciseAttempt.knowledge_point, func.count(ExerciseAttempt.id))
+        .where(ExerciseAttempt.user_id == student.id, ExerciseAttempt.is_correct == 0)
+        .group_by(ExerciseAttempt.knowledge_point)
+        .order_by(func.count(ExerciseAttempt.id).desc())
+    )
+    reading_result = await db.execute(
+        select(BookReadingPosition.book_id, BookReadingPosition.page, BookReadingPosition.updated_at)
+        .where(BookReadingPosition.user_id == student.id)
+        .order_by(BookReadingPosition.updated_at.desc())
+    )
+    latest_conversation_result = await db.execute(
+        select(func.max(Conversation.updated_at)).where(
+            or_(Conversation.user_id == student.user_id, Conversation.user_id == str(student.id)),
+            not_(Conversation.thread_id.startswith("course_aux_")),
+        )
+    )
+    latest_conversation = latest_conversation_result.scalar()
+    activity_times = [t for t in (student.last_login, latest_conversation, latest_attempt) if t]
+    latest_activity = max(activity_times) if activity_times else None
+    total_attempts = int(attempt_count or 0)
+    total_correct = int(correct_count or 0)
+
+    return {
+        "student": {
+            "id": student.id,
+            "user_login": student.user_id,
+            "student_name": roster_name or student.username,
+            "last_login": student.last_login.isoformat() if student.last_login else None,
+        },
+        "question_count": int(question_result.scalar() or 0),
+        "attempt_count": total_attempts,
+        "correct_count": total_correct,
+        "wrong_count": total_attempts - total_correct,
+        "accuracy": round(total_correct / total_attempts, 4) if total_attempts else None,
+        "wrong_knowledge_points": [
+            {"knowledge_point": name or "未分类", "count": int(count)} for name, count in wrong_result.all()
+        ],
+        "reading_positions": [
+            {"book_id": book_id, "page": page, "updated_at": updated_at.isoformat()}
+            for book_id, page, updated_at in reading_result.all()
+        ],
+        "latest_activity": latest_activity.isoformat() if latest_activity else None,
+    }
 # =============================================================================
 # 用户活动统计（管理员权限）
 # =============================================================================

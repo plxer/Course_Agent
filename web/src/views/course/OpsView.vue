@@ -31,9 +31,108 @@
             </a-button>
           </a-space>
           <p class="roster-hint">
-            CSV 必须为 UTF-8 编码且不超过 5 MB，表头为 <code>student_id,name</code>。导入会整体替换当前名单，不会修改已注册账号。
+            CSV 必须为 UTF-8 编码且不超过 5 MB，表头为
+            <code>student_id,name</code>。导入会整体替换当前名单，不会修改已注册账号。
           </p>
         </a-card>
+
+        <a-card class="roster-card" title="学生学情">
+          <a-table
+            :columns="studentColumns"
+            :data-source="students"
+            :loading="loadingStudents"
+            :pagination="{ pageSize: 10, showTotal: (total) => `共 ${total} 名学生` }"
+            row-key="id"
+            size="small"
+          >
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'name'">
+                {{ record.student_name || record.user_login }}
+              </template>
+              <template v-if="column.key === 'activity'">
+                {{ formatFullDate(record.last_login) }}
+              </template>
+              <template v-if="column.key === 'actions'">
+                <a-button type="link" size="small" @click="openStudentSummary(record)">
+                  查看详情
+                </a-button>
+              </template>
+            </template>
+          </a-table>
+        </a-card>
+
+        <a-modal
+          v-model:open="studentSummaryOpen"
+          :title="studentSummary?.student?.student_name || '学生学情详情'"
+          width="760px"
+          :footer="null"
+          destroy-on-close
+        >
+          <a-spin :spinning="loadingStudentSummary">
+            <template v-if="studentSummary">
+              <p class="roster-hint">
+                学号：{{ studentSummary.student.user_login }} · 最近活动：{{
+                  formatFullDate(studentSummary.latest_activity)
+                }}
+              </p>
+              <div class="ops-overview">
+                <div class="ops-stat-card">
+                  <span class="ops-stat-value">{{ studentSummary.question_count }}</span
+                  ><span class="ops-stat-label">AI提问数（学生消息）</span>
+                </div>
+                <div class="ops-stat-card">
+                  <span class="ops-stat-value">{{ studentSummary.attempt_count }}</span
+                  ><span class="ops-stat-label">做题量</span>
+                </div>
+                <div class="ops-stat-card">
+                  <span class="ops-stat-value">{{
+                    studentSummary.accuracy == null
+                      ? '—'
+                      : `${(studentSummary.accuracy * 100).toFixed(1)}%`
+                  }}</span
+                  ><span class="ops-stat-label">正确率</span>
+                </div>
+                <div class="ops-stat-card">
+                  <span class="ops-stat-value">{{ studentSummary.wrong_count }}</span
+                  ><span class="ops-stat-label">错题数</span>
+                </div>
+              </div>
+              <h4>错题知识点</h4>
+              <a-empty
+                v-if="!studentSummary.wrong_knowledge_points.length"
+                description="暂无错题"
+              />
+              <a-table
+                v-else
+                :columns="wrongPointColumns"
+                :data-source="studentSummary.wrong_knowledge_points"
+                :pagination="false"
+                row-key="knowledge_point"
+                size="small"
+              />
+              <h4>阅读位置</h4>
+              <a-empty v-if="!studentSummary.reading_positions.length" description="暂无阅读记录" />
+              <a-table
+                v-else
+                :columns="readingColumns"
+                :data-source="studentSummary.reading_positions"
+                :pagination="false"
+                row-key="book_id"
+                size="small"
+              >
+                <template #bodyCell="{ column, record }">
+                  <template v-if="column.key === 'updated_at'">{{
+                    formatFullDate(record.updated_at)
+                  }}</template>
+                </template>
+              </a-table>
+              <p class="roster-hint">
+                提问按 role=user
+                消息计数；正确率按全部已提交作答计算。系统目前没有学习计时事件，因此不显示学习时长。
+              </p>
+            </template>
+          </a-spin>
+        </a-modal>
 
         <div class="ops-overview">
           <div class="ops-stat-card">
@@ -472,6 +571,27 @@ const conversationDetail = ref(null)
 const exerciseAttempts = ref([])
 const loadingExercises = ref(false)
 const exerciseUserFilter = ref('')
+const students = ref([])
+const loadingStudents = ref(false)
+const studentSummaryOpen = ref(false)
+const loadingStudentSummary = ref(false)
+const studentSummary = ref(null)
+
+const studentColumns = [
+  { title: '学生姓名', key: 'name' },
+  { title: '学号', dataIndex: 'user_login', key: 'user_login' },
+  { title: '最近登录', key: 'activity' },
+  { title: '操作', key: 'actions', width: 90 }
+]
+const wrongPointColumns = [
+  { title: '知识点', dataIndex: 'knowledge_point', key: 'knowledge_point' },
+  { title: '错题数', dataIndex: 'count', key: 'count', width: 100 }
+]
+const readingColumns = [
+  { title: '书籍', dataIndex: 'book_id', key: 'book_id' },
+  { title: '最后阅读页', dataIndex: 'page', key: 'page', width: 110 },
+  { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at' }
+]
 
 const filters = reactive({
   user_id: '',
@@ -658,6 +778,33 @@ const loadStudentRosterCount = async () => {
   }
 }
 
+const loadStudents = async () => {
+  loadingStudents.value = true
+  try {
+    students.value = await dashboardApi.getStudents()
+  } catch (error) {
+    console.error('加载学生列表失败:', error)
+    message.error('加载学生列表失败')
+  } finally {
+    loadingStudents.value = false
+  }
+}
+
+const openStudentSummary = async (student) => {
+  studentSummaryOpen.value = true
+  loadingStudentSummary.value = true
+  studentSummary.value = null
+  try {
+    studentSummary.value = await dashboardApi.getStudentLearningSummary(student.id)
+  } catch (error) {
+    console.error('加载学生学情失败:', error)
+    message.error('加载学生学情失败')
+    studentSummaryOpen.value = false
+  } finally {
+    loadingStudentSummary.value = false
+  }
+}
+
 const handleRosterFileChange = (event) => {
   selectedRosterFile.value = event.target.files?.[0] || null
 }
@@ -830,6 +977,8 @@ const OPS_CHART_COLORS = [
 ]
 
 onMounted(() => {
+  loadStudents()
+  loadStudentRosterCount()
   const root = document.documentElement
   root.style.setProperty('--chart-palette-1', OPS_CHART_COLORS[0])
   root.style.setProperty('--chart-palette-2', OPS_CHART_COLORS[1])

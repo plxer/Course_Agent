@@ -8,6 +8,11 @@ import { apiAdminGet, apiAdminPost } from './base'
 export const dashboardApi = {
   getStudentRosterCount: () => apiAdminGet('/api/auth/student-roster'),
 
+  getStudents: () => apiAdminGet('/api/dashboard/students'),
+
+  getStudentLearningSummary: (userId) =>
+    apiAdminGet(`/api/dashboard/students/${userId}/learning-summary`),
+
   importStudentRoster: (file) => {
     const formData = new FormData()
     formData.append('file', file)
