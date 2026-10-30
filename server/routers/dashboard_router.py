@@ -381,7 +381,7 @@ async def get_students(
         select(User.id, User.user_id, User.username, StudentRoster.name, User.last_login)
         .outerjoin(StudentRoster, StudentRoster.student_id == User.user_id)
         .where(User.role == "user", User.is_deleted == 0)
-        .order_by(StudentRoster.name, User.user_id)
+        .order_by(User.last_login.desc().nulls_last(), StudentRoster.name, User.user_id)
     )
     return [
         {

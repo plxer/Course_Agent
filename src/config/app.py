@@ -209,6 +209,9 @@ class Config(BaseModel):
 
     def _handle_environment(self):
         """处理环境变量和运行时状态"""
+        if model_spec := os.getenv("DEFAULT_MODEL"):
+            self.default_model = model_spec
+
         # 处理模型目录
         self.model_dir = os.environ.get("MODEL_DIR") or self.model_dir
         if self.model_dir:

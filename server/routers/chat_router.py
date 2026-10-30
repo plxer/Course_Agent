@@ -122,10 +122,12 @@ async def call(query: str = Body(...), meta: dict = Body(None), current_user: Us
     if "request_id" not in meta or not meta.get("request_id"):
         meta["request_id"] = str(uuid.uuid4())
 
+    is_reading = meta.get("source") == "reading"
+
     model = select_model(
-        model_provider=meta.get("model_provider"),
-        model_name=meta.get("model_name"),
-        model_spec=meta.get("model_spec") or meta.get("model"),
+        model_provider=None if is_reading else meta.get("model_provider"),
+        model_name=None if is_reading else meta.get("model_name"),
+        model_spec=conf.default_model if is_reading else meta.get("model_spec") or meta.get("model"),
     )
 
     response = await model.call(query)

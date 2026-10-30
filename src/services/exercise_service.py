@@ -99,7 +99,8 @@ async def generate_question(
     else:
         prompt = f"题型：{type_label}，知识点：{knowledge_point}\n请生成一道题（可参考《计算机网络：自顶向下方法》）。"
 
-    model = load_chat_model(conf.default_model)
+    model_spec = conf.default_model
+    model = load_chat_model(model_spec)
     try:
         from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -121,7 +122,7 @@ async def generate_question(
                 db,
                 user_int_id=stats_user_id,
                 agent_id=COURSE_EXERCISE_AGENT_ID,
-                model_spec=conf.default_model,
+                model_spec=model_spec,
                 content=str(text)[:2000],
                 input_tokens=inp,
                 output_tokens=outp,

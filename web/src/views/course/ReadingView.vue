@@ -2490,6 +2490,10 @@ onMounted(async () => {
 /* 对话面板样式 */
 .reading-chat-panel {
   width: 400px;
+  height: min(72vh, 760px);
+  min-height: 420px;
+  max-height: calc(100vh - 160px);
+  flex-shrink: 0;
   background-color: var(--surface-panel-2);
   border-radius: 8px;
   box-shadow: 0 1px 0 var(--border-subtle);
@@ -2565,6 +2569,7 @@ onMounted(async () => {
 
 .reading-chat-messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 24px 24px 24px 20px;
   display: flex;

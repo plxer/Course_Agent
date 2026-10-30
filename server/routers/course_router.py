@@ -289,7 +289,8 @@ async def generate_conversation_title(
     prompt = """根据下面用户的第一条问题和助手的第一次回复，生成一句简短的对话标题（不超过20字，
 不要引号、不要 markdown、不要“标题：”等前缀）。只输出标题内容。"""
     user_content = f"用户问题：{body.first_question[:500]}\n助手回复：{body.first_answer[:500]}"
-    model = load_chat_model(conf.fast_model)
+    model_spec = conf.default_model
+    model = load_chat_model(model_spec)
     try:
         msg_list = [
             SystemMessage(content=prompt),
@@ -1231,7 +1232,8 @@ async def translate_text(
         return {"success": True, "translated": ""}
 
     prompt = "将以下英文翻译成中文。只输出译文，不要解释、不要序号、不要标题。若原文已是中文，则输出原文或简要说明。"
-    model = load_chat_model(conf.fast_model)
+    model_spec = conf.default_model
+    model = load_chat_model(model_spec)
     try:
         msg_list = [
             SystemMessage(content=prompt),
@@ -1244,7 +1246,7 @@ async def translate_text(
             db,
             user_int_id=current_user.id,
             agent_id=COURSE_TRANSLATE_AGENT_ID,
-            model_spec=conf.fast_model,
+            model_spec=model_spec,
             content=translated,
             input_tokens=inp,
             output_tokens=outp,

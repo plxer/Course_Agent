@@ -30,6 +30,7 @@ COPY ../uv.lock /app/uv.lock
 
 # 如果网络还是不好，可以在后面添加 --index-url https://pypi.tuna.tsinghua.edu.cn/simple
 # 课本伴读 PaddleOCR：在下一行追加 `&& uv sync --no-dev --group paddle`（旧版 Docker 勿用 RUN --mount，需先 DOCKER_BUILDKIT=1）
+ARG UV_HTTP_TIMEOUT=180
 RUN uv sync --no-dev --frozen
 
 # 激活虚拟环境并添加到PATH
