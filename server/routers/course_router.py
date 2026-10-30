@@ -978,11 +978,12 @@ def get_book_pages(book_id: str):
 
 
 _PAGE_CACHE_DIR = _PROJECT_ROOT / "saves" / "book_page_cache"
+_BOOK_PAGE_RENDER_SCALE = 1.4
 
 
 def _render_book_page_jpeg(path: Path, page_num: int, *, thumb: bool) -> bytes:
     """渲染一页为 JPEG，并按 PDF mtime 磁盘缓存。thumb 用于封面，避免列表页拉全幅图。"""
-    zoom = 0.35 if thumb else 1.4
+    zoom = 0.35 if thumb else _BOOK_PAGE_RENDER_SCALE
     quality = 70 if thumb else 78
     tag = "thumb" if thumb else "full"
     safe_stem = re.sub(r"[^A-Za-z0-9._-]", "_", path.stem)
@@ -1114,7 +1115,7 @@ class OcrRequest(BaseModel):
 def ocr_text_selection(body: OcrRequest):
     """对课本某一页的选区做 OCR，返回识别文本。
     前端传入的 (x,y,width,height) 为「页面图片」像素坐标，与 GET /books/{id}/page/{num}
-    返回的图片尺寸一致（Matrix 2x），需转换为 PDF 坐标后裁剪。
+    返回的图片尺寸一致，需转换为 PDF 坐标后裁剪。
     """
     if body.page_num < 1:
         raise HTTPException(status_code=400, detail="页码从 1 开始")
@@ -1127,8 +1128,8 @@ def ocr_text_selection(body: OcrRequest):
             if body.page_num > len(doc):
                 raise HTTPException(status_code=404, detail="页码超出范围")
             page = doc[body.page_num - 1]
-            # 前端传的是页面图片像素坐标（与 get_pixmap(matrix=2,2) 的尺寸一致），转换为 PDF 坐标
-            scale = 2.0  # 与下方 get_pixmap(Matrix(2,2)) 一致
+            # 前端使用的原图按 _BOOK_PAGE_RENDER_SCALE 渲染，转换为 PDF 坐标
+            scale = _BOOK_PAGE_RENDER_SCALE
             x_pdf = body.x / scale
             y_pdf = body.y / scale
             w_pdf = body.width / scale
@@ -1150,7 +1151,11 @@ def ocr_text_selection(body: OcrRequest):
                 from src.plugins.document_processor_base import OCRException
                 from src.plugins.rapid_ocr_processor import get_course_reading_rapid_ocr_processor
 
-                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=clip, alpha=False)
+                pix = page.get_pixmap(
+                    matrix=fitz.Matrix(_BOOK_PAGE_RENDER_SCALE, _BOOK_PAGE_RENDER_SCALE),
+                    clip=clip,
+                    alpha=False,
+                )
                 img_bytes = pix.tobytes(output="png")
                 with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                     tmp.write(img_bytes)

@@ -1125,6 +1125,9 @@ const startSelection = async (e) => {
     console.warn('图片未加载，无法开始选择')
     return
   }
+  const container = e.currentTarget.getBoundingClientRect()
+  const startX = e.clientX - container.left
+  const startY = e.clientY - container.top
 
   // 清除之前的选择状态 - 完全重置
   selectedText.value = ''
@@ -1136,14 +1139,12 @@ const startSelection = async (e) => {
   // 等待一个 tick 确保状态完全清除
   await nextTick()
 
-  const container = e.currentTarget.getBoundingClientRect()
-
   selection.value = {
     active: true,
-    startX: e.clientX - container.left,
-    startY: e.clientY - container.top,
-    endX: e.clientX - container.left,
-    endY: e.clientY - container.top
+    startX,
+    startY,
+    endX: startX,
+    endY: startY
   }
   isSelecting.value = true
   console.log('开始新选择，坐标:', selection.value, '已清除之前的状态')
