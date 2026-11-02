@@ -60,6 +60,7 @@
             controls
             autoplay
             class="videos-player"
+            @play="trackVideoActivity"
             @timeupdate="onVideoTimeUpdate"
           >
             您的浏览器不支持视频播放
@@ -144,7 +145,13 @@ import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import CourseTopbar from '@/components/course/CourseTopbar.vue'
 import CoursePageHero from '@/components/course/CoursePageHero.vue'
-import { listVideos, getVideoUrl, getVideoCaption, getVideoSummary } from '@/apis/courseApi.js'
+import {
+  listVideos,
+  getVideoUrl,
+  getVideoCaption,
+  getVideoSummary,
+  recordVideoActivity as saveVideoActivity
+} from '@/apis/courseApi.js'
 import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
@@ -200,6 +207,7 @@ const showSummaryPanel = ref(false)
 const videoSummary = ref(null)
 const videoSummaryError = ref('')
 const summaryLoading = ref(false)
+let lastVideoActivityAt = 0
 
 // 过滤后的视频列表
 const filteredVideos = computed(() => {
@@ -317,9 +325,19 @@ function formatTimeRange(startSec, endSec) {
 }
 
 // 视频 timeupdate：根据当前时间显示对应字幕（sentence_timestamps 中 start/end 为毫秒）
+function trackVideoActivity() {
+  const now = Date.now()
+  if (!currentVideo.value || now - lastVideoActivityAt < 30_000) return
+  lastVideoActivityAt = now
+  saveVideoActivity(currentVideo.value.id).catch((error) => {
+    console.error('记录视频学习活动失败:', error)
+  })
+}
+
 function onVideoTimeUpdate() {
   const video = videoEl.value
   const list = captionSentences.value
+  if (video) trackVideoActivity()
   if (!video || !list.length) {
     currentSubtitle.value = ''
     return
@@ -379,6 +397,7 @@ function seekTo(seconds) {
 // 当 currentVideo 变化时加载字幕
 watch(currentVideo, (v) => {
   if (v) {
+    lastVideoActivityAt = 0
     loadCaption()
     showSummaryPanel.value = false
     videoSummary.value = null

@@ -552,6 +552,19 @@ class BookReadingPosition(Base):
         }
 
 
+class VideoWatchActivity(Base):
+    """最近的视频学习活动：按用户、按视频记录最近播放时间。"""
+
+    __tablename__ = "video_watch_activities"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    video_id = Column(String(255), nullable=False, index=True)
+    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
+
+    __table_args__ = (UniqueConstraint("user_id", "video_id", name="uq_video_watch_activity_user_video"),)
+
+
 class ExerciseAttempt(Base):
     """习题作答记录：每题一次作答，记录对(1)错(0)，用于错题统计与积分。含题型、章节、知识点。"""
 

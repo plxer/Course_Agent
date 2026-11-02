@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.routers.auth_router import get_admin_user
 from server.utils.auth_middleware import get_db
 from src.repositories.conversation_repository import ConversationRepository
-from src.storage.postgres.models_business import StudentRoster, User
+from src.storage.postgres.models_business import OperationLog, StudentRoster, User
 from src.utils.datetime_utils import SHANGHAI_TZ, UTC, ensure_shanghai, shanghai_now, utc_now
 from src.utils.logging_config import logger
 
@@ -377,11 +377,17 @@ async def get_students(
     current_user: User = Depends(get_admin_user),
 ):
     """列出可查看学情的学生账号。"""
+    latest_login_log = (
+        select(func.max(OperationLog.timestamp))
+        .where(OperationLog.user_id == User.id, OperationLog.operation == "登录")
+        .scalar_subquery()
+    )
+    last_login = func.coalesce(latest_login_log, User.last_login)
     result = await db.execute(
-        select(User.id, User.user_id, User.username, StudentRoster.name, User.last_login)
+        select(User.id, User.user_id, User.username, StudentRoster.name, last_login)
         .outerjoin(StudentRoster, StudentRoster.student_id == User.user_id)
         .where(User.role == "user", User.is_deleted == 0)
-        .order_by(User.last_login.desc().nulls_last(), StudentRoster.name, User.user_id)
+        .order_by(last_login.desc().nulls_last(), StudentRoster.name, User.user_id)
     )
     return [
         {
@@ -406,6 +412,7 @@ async def get_student_learning_summary(
         Conversation,
         ExerciseAttempt,
         Message,
+        VideoWatchActivity,
     )
 
     student_result = await db.execute(
@@ -444,6 +451,21 @@ async def get_student_learning_summary(
         .where(BookReadingPosition.user_id == student.id)
         .order_by(BookReadingPosition.updated_at.desc())
     )
+    latest_reading_result = await db.execute(
+        select(func.max(BookReadingPosition.updated_at)).where(BookReadingPosition.user_id == student.id)
+    )
+    latest_reading = latest_reading_result.scalar()
+    latest_video_result = await db.execute(
+        select(func.max(VideoWatchActivity.updated_at)).where(VideoWatchActivity.user_id == student.id)
+    )
+    latest_video = latest_video_result.scalar()
+    latest_login_result = await db.execute(
+        select(func.max(OperationLog.timestamp)).where(
+            OperationLog.user_id == student.id,
+            OperationLog.operation == "登录",
+        )
+    )
+    latest_login_log = latest_login_result.scalar()
     latest_conversation_result = await db.execute(
         select(func.max(Conversation.updated_at)).where(
             or_(Conversation.user_id == student.user_id, Conversation.user_id == str(student.id)),
@@ -451,7 +473,8 @@ async def get_student_learning_summary(
         )
     )
     latest_conversation = latest_conversation_result.scalar()
-    activity_times = [t for t in (student.last_login, latest_conversation, latest_attempt) if t]
+    latest_login = latest_login_log or student.last_login
+    activity_times = [t for t in (latest_login, latest_conversation, latest_attempt, latest_reading, latest_video) if t]
     latest_activity = max(activity_times) if activity_times else None
     total_attempts = int(attempt_count or 0)
     total_correct = int(correct_count or 0)
@@ -461,9 +484,7 @@ async def get_student_learning_summary(
             "id": student.id,
             "user_login": student.user_id,
             "student_name": roster_name or student.username,
-            "last_login": _database_datetime_to_shanghai(student.last_login).isoformat()
-            if student.last_login
-            else None,
+            "last_login": _database_datetime_to_shanghai(latest_login).isoformat() if latest_login else None,
         },
         "question_count": int(question_result.scalar() or 0),
         "attempt_count": total_attempts,

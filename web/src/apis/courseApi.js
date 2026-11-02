@@ -158,6 +158,16 @@ export function getVideoUrl(videoId) {
   return `/api/course/videos/${encodeURIComponent(videoId)}`
 }
 
+/** 记录视频播放活动（需登录） */
+export function recordVideoActivity(videoId) {
+  return apiPost(
+    `/api/course/videos/${encodeURIComponent(videoId)}/activity`,
+    {},
+    {},
+    true
+  )
+}
+
 /** 视频字幕（sentence_timestamps 等），不存在则 404 */
 export function getVideoCaption(videoId) {
   return apiGet(`/api/course/videos/${encodeURIComponent(videoId)}/caption`, {}, false)

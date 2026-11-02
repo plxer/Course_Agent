@@ -39,6 +39,7 @@ from src.storage.postgres.models_business import (
     Message,
     User,
     UserMallItem,
+    VideoWatchActivity,
 )
 from src.utils import logger
 from src.utils.datetime_utils import format_utc_datetime, utc_now_naive
@@ -214,6 +215,31 @@ def get_video(video_id: str):
             "Cache-Control": "public, max-age=3600",
         },
     )
+
+
+@course.post("/videos/{video_id}/activity")
+async def record_video_activity(
+    video_id: str,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """记录当前用户最近播放视频的时间。"""
+    if not _resolve_video_path(video_id):
+        raise HTTPException(status_code=404, detail="视频不存在")
+
+    result = await db.execute(
+        select(VideoWatchActivity).where(
+            VideoWatchActivity.user_id == current_user.id,
+            VideoWatchActivity.video_id == video_id,
+        )
+    )
+    activity = result.scalar_one_or_none()
+    if activity:
+        activity.updated_at = utc_now_naive()
+    else:
+        db.add(VideoWatchActivity(user_id=current_user.id, video_id=video_id))
+    await db.commit()
+    return {"success": True}
 
 
 @course.get("/videos/{video_id}/caption")
@@ -1561,7 +1587,6 @@ async def exercises_submit(
         user_row = await db.get(User, current_user.id)
         if user_row:
             user_row.points = (user_row.points or 0) + 1
-            user_row.last_login = utc_now_naive()
 
     await db.commit()
     await db.refresh(attempt)
