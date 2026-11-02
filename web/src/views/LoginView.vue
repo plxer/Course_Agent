@@ -31,7 +31,7 @@
       <section class="login-visual">
         <img :src="loginBgImage" alt="登录背景" class="login-bg-image" />
         <div class="login-visual-copy">
-          <h1>天津大学课程数智化平台</h1>
+          <h1>{{ courseTitle }}</h1>
           <p>{{ brandSubtitle }}</p>
         </div>
       </section>
@@ -239,7 +239,7 @@ const brandSubtitle = computed(() => {
   return trimmed || '面向课程学习的智能问答与伴读系统'
 })
 // 顶栏固定标题，与课程页一致
-const courseTitle = '天津大学《计算机网络》课程数智化平台'
+const courseTitle = '天津大学《计算机网络》课程智能助教'
 
 // 状态
 const isFirstRun = ref(false)
