@@ -168,6 +168,11 @@ export function recordVideoActivity(videoId) {
   )
 }
 
+/** 累加课本伴读或视频的实际学习时长（需登录） */
+export function recordLearningDuration(activityType, seconds) {
+  return apiPost('/api/course/learning-duration', { activity_type: activityType, seconds }, {}, true)
+}
+
 /** 视频字幕（sentence_timestamps 等），不存在则 404 */
 export function getVideoCaption(videoId) {
   return apiGet(`/api/course/videos/${encodeURIComponent(videoId)}/caption`, {}, false)

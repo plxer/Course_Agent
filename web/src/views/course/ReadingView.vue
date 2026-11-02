@@ -474,7 +474,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick, h, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, h, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { renderCourseMarkdown } from '@/utils/courseMarkdown.js'
 import { Image, Images } from 'lucide-vue-next'
@@ -501,6 +501,7 @@ import {
   translateText as translateTextApi,
   getReadingPosition as getReadingPositionApi,
   saveReadingPosition as saveReadingPositionApi,
+  recordLearningDuration,
   getCourseDefaultAgent,
   getCourseAgentHistory,
   listCourseThreads,
@@ -1551,7 +1552,47 @@ const formatFileSize = (bytes) => {
   return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
 }
 
+let readingDurationInterval = null
+let lastReadingDurationAt = null
+
+function flushReadingDuration(now = Date.now()) {
+  if (lastReadingDurationAt === null) return
+  const seconds = Math.floor((now - lastReadingDurationAt) / 1000)
+  lastReadingDurationAt = now
+  if (userStore.isLoggedIn && selectedBook.value && seconds > 0 && seconds <= 30) {
+    recordLearningDuration('reading', seconds).catch((error) => {
+      console.error('记录课本阅读时长失败:', error)
+    })
+  }
+}
+
+function tickReadingDuration() {
+  if (
+    !userStore.isLoggedIn ||
+    !selectedBook.value ||
+    document.visibilityState !== 'visible'
+  ) {
+    lastReadingDurationAt = null
+    return
+  }
+  if (lastReadingDurationAt === null) {
+    lastReadingDurationAt = Date.now()
+    return
+  }
+  flushReadingDuration()
+}
+
+function handleReadingVisibilityChange() {
+  if (document.visibilityState === 'hidden') {
+    flushReadingDuration()
+  } else if (userStore.isLoggedIn && selectedBook.value) {
+    lastReadingDurationAt = Date.now()
+  }
+}
+
 onMounted(async () => {
+  readingDurationInterval = window.setInterval(tickReadingDuration, 15_000)
+  document.addEventListener('visibilitychange', handleReadingVisibilityChange)
   await loadBooks()
   const q = route.query
   const bookId = q.book && String(q.book).trim()
@@ -1595,6 +1636,12 @@ onMounted(async () => {
       console.error('获取默认智能体失败:', err)
     }
   }
+})
+
+onUnmounted(() => {
+  flushReadingDuration()
+  window.clearInterval(readingDurationInterval)
+  document.removeEventListener('visibilitychange', handleReadingVisibilityChange)
 })
 </script>
 

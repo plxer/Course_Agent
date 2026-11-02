@@ -225,9 +225,9 @@
             size="small"
           >
             <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'last_login'">{{
-                formatDate(record.last_login)
-              }}</template>
+              <template v-if="column.key === 'last_login'">
+                {{ formatDate(record.last_login) }}
+              </template>
               <template v-if="column.key === 'actions'"
                 ><a-button type="link" @click="showStudent(record)">查看详情</a-button></template
               >
@@ -246,7 +246,9 @@
         <a-spin :spinning="loadingSummary">
           <template v-if="summary">
             <p class="detail-meta">
-              学号：{{ summary.student.user_login }} · 最近活动：{{
+              学号：{{ summary.student.user_login }} · 最近登录：{{
+                formatDate(summary.student.last_login)
+              }} · 最近活动：{{
                 formatDate(summary.latest_activity)
               }}
             </p>
@@ -291,7 +293,7 @@
               >
             </a-table>
             <p class="detail-meta">
-              学习时长未统计：当前没有可用于计算时长的开始、暂停和结束记录。
+              学习时长：{{ formatDuration(summary.total_learning_seconds) }}（课本伴读前台阅读 + 视频播放）
             </p>
           </template>
         </a-spin>
@@ -379,6 +381,15 @@ const heatColor = (count) => {
   return `rgba(52, 211, 153, ${opacity})`
 }
 const percent = (value) => (value == null ? '—' : `${(value * 100).toFixed(1)}%`)
+const formatDuration = (value) => {
+  const totalSeconds = Math.max(0, Number(value) || 0)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = Math.floor(totalSeconds % 60)
+  if (hours) return `${hours}小时${minutes}分`
+  if (minutes) return `${minutes}分${seconds}秒`
+  return `${seconds}秒`
+}
 const formatDate = (value) =>
   value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—'
 

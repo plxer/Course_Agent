@@ -7,12 +7,13 @@ import uuid
 import random
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import fitz
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse, FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src import config as conf
@@ -35,6 +36,7 @@ from src.repositories.conversation_repository import ConversationRepository
 from src.storage.postgres.models_business import (
     BookReadingPosition,
     ExerciseAttempt,
+    LearningDuration,
     MallItem,
     Message,
     User,
@@ -238,6 +240,36 @@ async def record_video_activity(
         activity.updated_at = utc_now_naive()
     else:
         db.add(VideoWatchActivity(user_id=current_user.id, video_id=video_id))
+    await db.commit()
+    return {"success": True}
+
+
+class LearningDurationBody(BaseModel):
+    activity_type: Literal["reading", "video"]
+    seconds: int = Field(ge=1, le=30)
+
+
+@course.post("/learning-duration")
+async def record_learning_duration(
+    body: LearningDurationBody,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """累加课本伴读或视频的前台学习时长。"""
+    statement = pg_insert(LearningDuration).values(
+        user_id=current_user.id,
+        activity_type=body.activity_type,
+        total_seconds=body.seconds,
+    )
+    await db.execute(
+        statement.on_conflict_do_update(
+            constraint="uq_learning_duration_user_activity",
+            set_={
+                "total_seconds": LearningDuration.total_seconds + body.seconds,
+                "updated_at": utc_now_naive(),
+            },
+        )
+    )
     await db.commit()
     return {"success": True}
 

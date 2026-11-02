@@ -60,7 +60,13 @@
             controls
             autoplay
             class="videos-player"
-            @play="trackVideoActivity"
+            @play="handleVideoPlay"
+            @playing="startVideoDuration"
+            @pause="flushVideoDuration"
+            @ended="flushVideoDuration"
+            @waiting="flushVideoDuration"
+            @seeking="flushVideoDuration"
+            @seeked="startVideoDuration"
             @timeupdate="onVideoTimeUpdate"
           >
             您的浏览器不支持视频播放
@@ -141,7 +147,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import CourseTopbar from '@/components/course/CourseTopbar.vue'
 import CoursePageHero from '@/components/course/CoursePageHero.vue'
@@ -150,7 +156,8 @@ import {
   getVideoUrl,
   getVideoCaption,
   getVideoSummary,
-  recordVideoActivity as saveVideoActivity
+  recordVideoActivity as saveVideoActivity,
+  recordLearningDuration
 } from '@/apis/courseApi.js'
 import { useUserStore } from '@/stores/user'
 
@@ -208,6 +215,8 @@ const videoSummary = ref(null)
 const videoSummaryError = ref('')
 const summaryLoading = ref(false)
 let lastVideoActivityAt = 0
+let lastVideoDurationAt = null
+let videoDurationInterval = null
 
 // 过滤后的视频列表
 const filteredVideos = computed(() => {
@@ -325,13 +334,78 @@ function formatTimeRange(startSec, endSec) {
 }
 
 // 视频 timeupdate：根据当前时间显示对应字幕（sentence_timestamps 中 start/end 为毫秒）
-function trackVideoActivity() {
+function trackVideoActivity(force = false) {
+  if (!userStore.isLoggedIn || !currentVideo.value) return
   const now = Date.now()
-  if (!currentVideo.value || now - lastVideoActivityAt < 30_000) return
+  if (!force && now - lastVideoActivityAt < 30_000) return
   lastVideoActivityAt = now
   saveVideoActivity(currentVideo.value.id).catch((error) => {
     console.error('记录视频学习活动失败:', error)
   })
+}
+
+function flushVideoDuration() {
+  if (lastVideoDurationAt === null) return
+  const seconds = Math.floor((Date.now() - lastVideoDurationAt) / 1000)
+  lastVideoDurationAt = null
+  if (userStore.isLoggedIn && seconds > 0 && seconds <= 30) {
+    recordLearningDuration('video', seconds).catch((error) => {
+      console.error('记录视频学习时长失败:', error)
+    })
+  }
+}
+
+function handleVideoPlay() {
+  trackVideoActivity(true)
+}
+
+function startVideoDuration() {
+  if (userStore.isLoggedIn && document.visibilityState === 'visible') {
+    lastVideoDurationAt = Date.now()
+  }
+}
+
+function tickVideoDuration() {
+  const video = videoEl.value
+  if (
+    !userStore.isLoggedIn ||
+    document.visibilityState !== 'visible' ||
+    !video ||
+    video.paused ||
+    video.ended ||
+    video.seeking ||
+    video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA
+  ) {
+    lastVideoDurationAt = null
+    return
+  }
+  if (lastVideoDurationAt === null) {
+    lastVideoDurationAt = Date.now()
+    return
+  }
+  const now = Date.now()
+  const seconds = Math.floor((now - lastVideoDurationAt) / 1000)
+  lastVideoDurationAt = now
+  if (seconds > 0 && seconds <= 30) {
+    recordLearningDuration('video', seconds).catch((error) => {
+      console.error('记录视频学习时长失败:', error)
+    })
+  }
+  trackVideoActivity()
+}
+
+function handleVideoVisibilityChange() {
+  if (document.visibilityState === 'hidden') {
+    flushVideoDuration()
+  } else if (
+    videoEl.value &&
+    !videoEl.value.paused &&
+    !videoEl.value.ended &&
+    !videoEl.value.seeking &&
+    videoEl.value.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA
+  ) {
+    lastVideoDurationAt = Date.now()
+  }
 }
 
 function onVideoTimeUpdate() {
@@ -398,6 +472,7 @@ function seekTo(seconds) {
 watch(currentVideo, (v) => {
   if (v) {
     lastVideoActivityAt = 0
+    lastVideoDurationAt = null
     loadCaption()
     showSummaryPanel.value = false
     videoSummary.value = null
@@ -406,6 +481,8 @@ watch(currentVideo, (v) => {
 })
 
 onMounted(async () => {
+  videoDurationInterval = window.setInterval(tickVideoDuration, 15_000)
+  document.addEventListener('visibilitychange', handleVideoVisibilityChange)
   await loadVideos()
   const videoId = route.query.video
   if (videoId && chapters.value.length > 0) {
@@ -422,6 +499,12 @@ onMounted(async () => {
     link.rel = 'stylesheet'
     document.head.appendChild(link)
   }
+})
+
+onUnmounted(() => {
+  flushVideoDuration()
+  window.clearInterval(videoDurationInterval)
+  document.removeEventListener('visibilitychange', handleVideoVisibilityChange)
 })
 </script>
 

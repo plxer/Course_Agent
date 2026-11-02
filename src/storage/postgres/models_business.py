@@ -565,6 +565,21 @@ class VideoWatchActivity(Base):
     __table_args__ = (UniqueConstraint("user_id", "video_id", name="uq_video_watch_activity_user_video"),)
 
 
+class LearningDuration(Base):
+    """课本伴读与视频的累计学习时长。"""
+
+    __tablename__ = "learning_durations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    activity_type = Column(String(16), nullable=False)
+    total_seconds = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=utc_now_naive)
+    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
+
+    __table_args__ = (UniqueConstraint("user_id", "activity_type", name="uq_learning_duration_user_activity"),)
+
+
 class ExerciseAttempt(Base):
     """习题作答记录：每题一次作答，记录对(1)错(0)，用于错题统计与积分。含题型、章节、知识点。"""
 

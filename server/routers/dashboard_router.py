@@ -411,6 +411,7 @@ async def get_student_learning_summary(
         BookReadingPosition,
         Conversation,
         ExerciseAttempt,
+        LearningDuration,
         Message,
         VideoWatchActivity,
     )
@@ -476,6 +477,9 @@ async def get_student_learning_summary(
     latest_login = latest_login_log or student.last_login
     activity_times = [t for t in (latest_login, latest_conversation, latest_attempt, latest_reading, latest_video) if t]
     latest_activity = max(activity_times) if activity_times else None
+    duration_result = await db.execute(
+        select(func.coalesce(func.sum(LearningDuration.total_seconds), 0)).where(LearningDuration.user_id == student.id)
+    )
     total_attempts = int(attempt_count or 0)
     total_correct = int(correct_count or 0)
 
@@ -503,6 +507,7 @@ async def get_student_learning_summary(
             for book_id, page, updated_at in reading_result.all()
         ],
         "latest_activity": _database_datetime_to_shanghai(latest_activity).isoformat() if latest_activity else None,
+        "total_learning_seconds": int(duration_result.scalar() or 0),
     }
 
 

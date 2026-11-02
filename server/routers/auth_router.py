@@ -432,6 +432,11 @@ async def register_user(register_data: RegisterRequest, db: AsyncSession = Depen
         }
     )
 
+    registered_user = await db.get(User, new_user.id)
+    registered_user.last_login = utc_now_naive()
+    await db.commit()
+    await log_operation(db, new_user.id, "登录", "注册后自动登录")
+
     token_data = {"sub": str(new_user.id)}
     access_token = AuthUtils.create_access_token(token_data)
     department_name = default_dept.name if default_dept else None
