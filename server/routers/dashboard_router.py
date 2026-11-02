@@ -36,7 +36,7 @@ def _shanghai_day_start_as_utc_naive(day: date) -> datetime:
     return datetime.combine(day, datetime.min.time(), tzinfo=SHANGHAI_TZ).astimezone(UTC).replace(tzinfo=None)
 
 
-def _first_learning_activity(user_id, user_login):
+def _first_learning_activity(user_id, user_login, conversation_user_id):
     from src.storage.postgres.models_business import (
         BookReadingPosition,
         Conversation,
@@ -46,7 +46,7 @@ def _first_learning_activity(user_id, user_login):
     )
 
     conversation_times = select(func.min(Conversation.created_at)).where(
-        or_(Conversation.user_id == user_login, Conversation.user_id == cast(user_id, String)),
+        or_(Conversation.user_id == user_login, Conversation.user_id == conversation_user_id),
         not_(Conversation.thread_id.startswith("course_aux_")),
     )
     attempt_times = select(func.min(ExerciseAttempt.created_at)).where(ExerciseAttempt.user_id == user_id)
@@ -403,7 +403,7 @@ async def get_students(
     current_user: User = Depends(get_admin_user),
 ):
     """列出可查看学情的学生账号。"""
-    first_activity = _first_learning_activity(User.id, User.user_id)
+    first_activity = _first_learning_activity(User.id, User.user_id, cast(User.id, String))
     latest_login_log = (
         select(func.max(OperationLog.timestamp))
         .where(OperationLog.user_id == User.id, OperationLog.operation == "登录")
@@ -502,7 +502,9 @@ async def get_student_learning_summary(
         )
     )
     latest_login_log = latest_login_result.scalar()
-    first_activity_result = await db.execute(select(_first_learning_activity(student.id, student.user_id)))
+    first_activity_result = await db.execute(
+        select(_first_learning_activity(student.id, student.user_id, str(student.id)))
+    )
     first_activity = first_activity_result.scalar()
     latest_conversation_result = await db.execute(
         select(func.max(Conversation.updated_at)).where(
