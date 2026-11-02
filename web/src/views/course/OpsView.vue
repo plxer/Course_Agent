@@ -32,7 +32,8 @@
           </a-space>
           <p class="roster-hint">
             CSV 必须为 UTF-8 编码且不超过 5 MB，表头为
-            <code>student_id,name</code>。导入会整体替换当前名单，不会修改已注册账号。
+            <code>student_id,name</code>；可选添加 <code>password</code> 列为未注册学生批量创建账号
+            （密码至少 6 位）。导入会整体替换当前名单，不修改已注册账号；新账号的注册时间与最近登录时间一致。
           </p>
         </a-card>
 
@@ -670,7 +671,16 @@ const uploadStudentRoster = async () => {
     studentRosterCount.value = response.student_count
     selectedRosterFile.value = null
     if (rosterFileInput.value) rosterFileInput.value.value = ''
-    message.success(`学生名单导入成功，共 ${response.student_count} 人`)
+    const registrationDetails = []
+    if (response.registered_count > 0) registrationDetails.push(`新注册 ${response.registered_count} 人`)
+    if (response.skipped_registered_count > 0) {
+      registrationDetails.push(`已注册跳过 ${response.skipped_registered_count} 人`)
+    }
+    if (response.skipped_invalid_password_count > 0) {
+      registrationDetails.push(`密码无效跳过 ${response.skipped_invalid_password_count} 人`)
+    }
+    const registrationMessage = registrationDetails.length ? `，${registrationDetails.join('，')}` : ''
+    message.success(`学生名单导入成功，共 ${response.student_count} 人${registrationMessage}`)
   } catch (error) {
     console.error('导入学生名单失败:', error)
     message.error(error.message || '导入学生名单失败')

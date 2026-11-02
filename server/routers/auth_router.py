@@ -11,7 +11,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.storage.postgres.manager import pg_manager
-from src.storage.postgres.models_business import User, Department, StudentRoster
+from src.storage.postgres.models_business import Department, OperationLog, StudentRoster, User
 from src.repositories.user_repository import UserRepository
 from src.repositories.department_repository import DepartmentRepository
 from server.utils.auth_middleware import (
@@ -330,16 +330,21 @@ async def import_student_roster(
         text_content = content.decode("utf-8-sig")
         reader = csv.DictReader(io.StringIO(text_content, newline=""))
         headers = [header.strip() for header in (reader.fieldnames or [])]
-        if len(headers) != 2 or set(headers) != {"student_id", "name"}:
+        has_passwords = set(headers) == {"student_id", "name", "password"}
+        if not (
+            (len(headers) == 2 and set(headers) == {"student_id", "name"}) or (len(headers) == 3 and has_passwords)
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="CSV 表头必须包含 student_id,name 两列",
+                detail="CSV 表头必须为 student_id,name，可选 password 列用于批量注册",
             )
         reader.fieldnames = headers
 
         roster_by_id: dict[str, StudentRoster] = {}
+        passwords_by_id: dict[str, str] = {}
         for line_number, row in enumerate(reader, start=2):
-            if None in row or set(row) != {"student_id", "name"}:
+            expected_headers = {"student_id", "name", "password"} if has_passwords else {"student_id", "name"}
+            if None in row or set(row) != expected_headers:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"CSV 第 {line_number} 行列数不正确",
@@ -351,6 +356,10 @@ async def import_student_roster(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"CSV 第 {line_number} 行的学号或姓名为空或超出长度限制",
                 )
+            if has_passwords:
+                password = row.get("password") or ""
+                if password.strip() and len(password) >= 6:
+                    passwords_by_id[student_id] = password
             if student_id in roster_by_id:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -367,10 +376,57 @@ async def import_student_roster(
     if not roster_by_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CSV 中没有学生记录")
 
+    registered_count = 0
+    skipped_registered_count = 0
+    skipped_invalid_password_count = 0
+    if has_passwords:
+        existing_result = await db.execute(select(User.user_id).where(User.user_id.in_(list(roster_by_id))))
+        existing_user_ids = set(existing_result.scalars().all())
+        users_to_create = [
+            student_id
+            for student_id in roster_by_id
+            if student_id not in existing_user_ids and student_id in passwords_by_id
+        ]
+        skipped_registered_count = len(existing_user_ids)
+        skipped_invalid_password_count = len(set(roster_by_id) - existing_user_ids - set(passwords_by_id))
+
+        default_department_result = await db.execute(select(Department.id).where(Department.name == "默认部门"))
+        department_id = default_department_result.scalar_one_or_none()
+        registered_at = utc_now_naive()
+        new_users = [
+            User(
+                username=roster_by_id[student_id].name,
+                user_id=student_id,
+                password_hash=AuthUtils.hash_password(passwords_by_id[student_id]),
+                role="user",
+                department_id=department_id,
+                created_at=registered_at,
+                last_login=registered_at,
+            )
+            for student_id in users_to_create
+        ]
+        db.add_all(new_users)
+        await db.flush()
+        db.add_all(
+            OperationLog(
+                user_id=user.id,
+                operation="登录",
+                details="管理员批量导入后创建账号",
+                timestamp=registered_at,
+            )
+            for user in new_users
+        )
+        registered_count = len(new_users)
+
     await db.execute(delete(StudentRoster))
     db.add_all(roster_by_id.values())
     await db.commit()
-    return {"student_count": len(roster_by_id)}
+    return {
+        "student_count": len(roster_by_id),
+        "registered_count": registered_count,
+        "skipped_registered_count": skipped_registered_count,
+        "skipped_invalid_password_count": skipped_invalid_password_count,
+    }
 
 
 # 路由：用户自助注册（公开，无需登录）
