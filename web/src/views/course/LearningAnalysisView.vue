@@ -233,6 +233,11 @@
               >
             </template>
           </a-table>
+          <div class="student-roster-filter">
+            <a-checkbox v-model:checked="onlyRosteredStudents">
+              只显示当前学生名单中的学生
+            </a-checkbox>
+          </div>
         </section>
       </a-spin>
 
@@ -318,6 +323,7 @@ const students = ref([])
 const loading = ref(false)
 const loadingStudents = ref(false)
 const studentFilter = ref('')
+const onlyRosteredStudents = ref(false)
 const studentModalOpen = ref(false)
 const loadingSummary = ref(false)
 const summary = ref(null)
@@ -349,10 +355,11 @@ const readingColumns = [
 ]
 const filteredStudents = computed(() => {
   const term = studentFilter.value.trim().toLowerCase()
-  if (!term) return students.value
-  return students.value.filter((student) =>
-    `${student.student_name || ''} ${student.user_login || ''}`.toLowerCase().includes(term)
-  )
+  return students.value.filter((student) => {
+    if (onlyRosteredStudents.value && !student.is_rostered) return false
+    if (!term) return true
+    return `${student.student_name || ''} ${student.user_login || ''}`.toLowerCase().includes(term)
+  })
 })
 const trendRecent = computed(() =>
   (data.value.trend_14_days || []).filter((item) => item.period === 'recent')
@@ -433,6 +440,9 @@ onMounted(loadData)
 <style scoped lang="less">
 .learning-main {
   padding-bottom: 48px;
+}
+.student-roster-filter {
+  margin-top: 12px;
 }
 .hero-description {
   display: flex;

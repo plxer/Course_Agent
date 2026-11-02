@@ -36,6 +36,32 @@ def _shanghai_day_start_as_utc_naive(day: date) -> datetime:
     return datetime.combine(day, datetime.min.time(), tzinfo=SHANGHAI_TZ).astimezone(UTC).replace(tzinfo=None)
 
 
+def _first_learning_activity(user_id, user_login):
+    from src.storage.postgres.models_business import (
+        BookReadingPosition,
+        Conversation,
+        ExerciseAttempt,
+        LearningDuration,
+        VideoWatchActivity,
+    )
+
+    conversation_times = select(func.min(Conversation.created_at)).where(
+        or_(Conversation.user_id == user_login, Conversation.user_id == cast(user_id, String)),
+        not_(Conversation.thread_id.startswith("course_aux_")),
+    )
+    attempt_times = select(func.min(ExerciseAttempt.created_at)).where(ExerciseAttempt.user_id == user_id)
+    reading_times = select(func.min(BookReadingPosition.updated_at)).where(BookReadingPosition.user_id == user_id)
+    video_times = select(func.min(VideoWatchActivity.updated_at)).where(VideoWatchActivity.user_id == user_id)
+    duration_times = select(func.min(LearningDuration.created_at)).where(LearningDuration.user_id == user_id)
+    return func.least(
+        conversation_times.scalar_subquery(),
+        attempt_times.scalar_subquery(),
+        reading_times.scalar_subquery(),
+        video_times.scalar_subquery(),
+        duration_times.scalar_subquery(),
+    )
+
+
 def _get_time_group_format(column, time_range: str) -> Any:
     """
     根据数据库类型生成时间分组格式化表达式。
@@ -377,14 +403,22 @@ async def get_students(
     current_user: User = Depends(get_admin_user),
 ):
     """列出可查看学情的学生账号。"""
+    first_activity = _first_learning_activity(User.id, User.user_id)
     latest_login_log = (
         select(func.max(OperationLog.timestamp))
         .where(OperationLog.user_id == User.id, OperationLog.operation == "登录")
         .scalar_subquery()
     )
-    last_login = func.coalesce(latest_login_log, User.last_login)
+    last_login = func.coalesce(latest_login_log, User.last_login, User.created_at, first_activity)
     result = await db.execute(
-        select(User.id, User.user_id, User.username, StudentRoster.name, last_login)
+        select(
+            User.id,
+            User.user_id,
+            User.username,
+            StudentRoster.name,
+            last_login,
+            StudentRoster.student_id.is_not(None),
+        )
         .outerjoin(StudentRoster, StudentRoster.student_id == User.user_id)
         .where(User.role == "user", User.is_deleted == 0)
         .order_by(last_login.desc().nulls_last(), StudentRoster.name, User.user_id)
@@ -395,8 +429,9 @@ async def get_students(
             "user_login": login,
             "student_name": roster_name or username,
             "last_login": _database_datetime_to_shanghai(last_login).isoformat() if last_login else None,
+            "is_rostered": is_rostered,
         }
-        for user_id, login, username, roster_name, last_login in result.all()
+        for user_id, login, username, roster_name, last_login, is_rostered in result.all()
     ]
 
 
@@ -467,6 +502,8 @@ async def get_student_learning_summary(
         )
     )
     latest_login_log = latest_login_result.scalar()
+    first_activity_result = await db.execute(select(_first_learning_activity(student.id, student.user_id)))
+    first_activity = first_activity_result.scalar()
     latest_conversation_result = await db.execute(
         select(func.max(Conversation.updated_at)).where(
             or_(Conversation.user_id == student.user_id, Conversation.user_id == str(student.id)),
@@ -474,8 +511,19 @@ async def get_student_learning_summary(
         )
     )
     latest_conversation = latest_conversation_result.scalar()
-    latest_login = latest_login_log or student.last_login
-    activity_times = [t for t in (latest_login, latest_conversation, latest_attempt, latest_reading, latest_video) if t]
+    latest_login = latest_login_log or student.last_login or student.created_at or first_activity
+    activity_times = [
+        t
+        for t in (
+            latest_login_log,
+            student.last_login,
+            latest_conversation,
+            latest_attempt,
+            latest_reading,
+            latest_video,
+        )
+        if t
+    ]
     latest_activity = max(activity_times) if activity_times else None
     duration_result = await db.execute(
         select(func.coalesce(func.sum(LearningDuration.total_seconds), 0)).where(LearningDuration.user_id == student.id)
