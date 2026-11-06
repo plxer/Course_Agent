@@ -525,6 +525,7 @@ const navItems = [
   },
   { to: '/videos', label: '视频', match: ['/videos'] },
   { to: '/exercises', label: '习题推荐', match: ['/exercises'] },
+  { to: '/my-learning', label: '我的学情', match: ['/my-learning'], studentOnly: true },
   { to: '/ops', label: '运维', match: ['/ops'], adminOnly: true },
   { to: '/guide', label: '使用指南', match: ['/guide'] }
 ]

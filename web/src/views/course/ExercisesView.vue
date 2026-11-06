@@ -15,6 +15,16 @@
         subtitle="选择章节与题型，快速生成围绕个人薄弱点的课程练习。"
       />
 
+      <a-alert
+        v-if="typeof route.query.topic === 'string'"
+        :type="reviewPointSelected ? 'success' : 'info'"
+        :message="reviewPointSelected ? '已选中专项自测知识点' : '专项自测：' + route.query.topic"
+        :description="reviewPointSelected
+          ? '请确认题型和题量后开始小测。'
+          : '若有正在进行的小测，请先完成；也可以从章节目录手动选择复习知识点。'"
+        show-icon
+      />
+
       <!-- 题型 + 知识点选择 -->
       <section class="exercises-select-section">
         <h2 class="exercises-section-title">选择题型</h2>
@@ -238,7 +248,7 @@
               type="button"
               class="exercises-clear-quiz-btn"
               :disabled="clearQuizDisabled"
-              @click="clearQuiz"
+              @click="clearQuiz(); selectReviewPoint()"
             >
               清除
             </button>
@@ -556,7 +566,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { useUserStore } from '@/stores/user'
 import { marked } from 'marked'
@@ -573,6 +583,7 @@ import {
 } from '@/apis/courseApi'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 const handleLogout = () => {
   userStore.logout()
@@ -593,6 +604,12 @@ const chaptersLoading = ref(true)
 const chaptersError = ref('')
 const selectedChapterId = ref(null)
 const selectedKnowledgePointIds = ref([])
+const reviewPointSelected = computed(() =>
+  typeof route.query.topic === 'string' &&
+  selectedChapterKnowledgePoints.value.some(
+    (point) => point.title === route.query.topic && isKnowledgePointSelected(point.id)
+  )
+)
 /** 小测题位（与后端 quiz-plan 一致），有会话时 length > 0 */
 const quizPlan = ref([])
 const quizQuestions = ref([]) // 与 plan 等长；未生成的题为 null
@@ -1590,9 +1607,26 @@ function drawWrongChart() {
   chart.resize()
 }
 
+function selectReviewPoint() {
+  if ((!quizSessionActive.value || quizFinished.value) && typeof route.query.topic === 'string') {
+    const chapter = chapters.value.find(
+      (item) =>
+        (!route.query.chapter || String(item.id) === route.query.chapter) &&
+        item.knowledge_points?.some((point) => point.title === route.query.topic)
+    )
+    const point = chapter?.knowledge_points.find((item) => item.title === route.query.topic)
+    if (point) {
+      if (quizFinished.value) clearQuiz()
+      selectedChapterId.value = chapter.id
+      selectedKnowledgePointIds.value = [point.id]
+    }
+  }
+}
+
 onMounted(async () => {
   await loadChapters()
   restoreQuizState()
+  selectReviewPoint()
 })
 </script>
 

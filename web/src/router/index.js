@@ -24,6 +24,12 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresAdmin: true }
     },
     {
+      path: '/my-learning',
+      name: 'myLearning',
+      component: () => import('../views/course/PersonalLearningView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/learning-analysis',
       name: 'learningAnalysis',
       component: () => import('../views/course/LearningAnalysisView.vue'),

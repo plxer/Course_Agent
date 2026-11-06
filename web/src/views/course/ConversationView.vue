@@ -291,7 +291,7 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { renderCourseMarkdown } from '@/utils/courseMarkdown.js'
 import { message } from 'ant-design-vue'
 import { Image } from 'lucide-vue-next'
@@ -314,6 +314,7 @@ import { useUserStore } from '@/stores/user'
 import { useCourseConversationStore } from '@/stores/courseConversation'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 const store = useCourseConversationStore()
 const inputMessage = ref('')
@@ -994,7 +995,7 @@ const stopStream = () => {
 
 // 初始化：已登录时从后端拉取对话列表并选中第一个；未登录时仅创建本地对话
 // 若 store 中已有数据（如从其他页面切回），则不再覆盖，避免对话消失
-onMounted(async () => {
+async function initializeConversation() {
   if (!document.querySelector('link[href*="font-awesome"]')) {
     const link = document.createElement('link')
     link.href = 'https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css'
@@ -1044,11 +1045,19 @@ onMounted(async () => {
     if (store.chatList.length > 0) {
       await switchChat(store.chatList[0].id)
     } else {
-      createNewChat()
+      await createNewChat()
     }
   } catch (err) {
     console.error('加载课程对话列表失败:', err)
     createNewChatLocal()
+  }
+}
+
+onMounted(async () => {
+  await initializeConversation()
+  const topic = route.query.review
+  if (typeof topic === 'string' && topic.trim()) {
+    inputMessage.value = `我想复习「${topic}」。请结合计算机网络课程解释核心概念和常见误区，并给我一个检查理解的小问题。`
   }
 })
 

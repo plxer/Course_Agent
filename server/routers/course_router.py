@@ -6,6 +6,7 @@ import json
 import uuid
 import random
 import math
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -1575,6 +1576,50 @@ class ExerciseSubmitRequest(BaseModel):
     user_answer: str
     chapter: str | None = None  # 章节号，用于错题统计展示
     section_title: str | None = None  # 小节标题，用于错题统计展示
+
+
+@course.get("/learning-analysis")
+async def get_personal_learning_analysis(
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """统计当前登录用户近30天的习题表现，按知识点给出复习依据。"""
+    now = utc_now_naive()
+    recent_start = now - timedelta(days=15)
+    attempts = func.count(ExerciseAttempt.id)
+    wrong = attempts.filter(ExerciseAttempt.is_correct == 0)
+    recent_attempts = attempts.filter(ExerciseAttempt.created_at >= recent_start)
+    recent_wrong = wrong.filter(ExerciseAttempt.created_at >= recent_start)
+    rows = await db.execute(
+        select(
+            ExerciseAttempt.chapter,
+            ExerciseAttempt.knowledge_point,
+            attempts,
+            wrong,
+            recent_attempts,
+            recent_wrong,
+        )
+        .where(
+            ExerciseAttempt.user_id == current_user.id,
+            ExerciseAttempt.created_at >= now - timedelta(days=30),
+            ExerciseAttempt.created_at < now,
+        )
+        .group_by(ExerciseAttempt.chapter, ExerciseAttempt.knowledge_point)
+        .order_by(wrong.desc(), ExerciseAttempt.chapter, ExerciseAttempt.knowledge_point)
+    )
+    return {
+        "knowledge_points": [
+            {
+                "chapter": chapter,
+                "title": title,
+                "attempts": total,
+                "wrong": errors,
+                "recent_attempts": recent_total,
+                "recent_wrong": recent_errors,
+            }
+            for chapter, title, total, errors, recent_total, recent_errors in rows
+        ],
+    }
 
 
 @course.post("/exercises/submit")

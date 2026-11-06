@@ -72,13 +72,17 @@ const defaultNavItems = [
   { to: '/videos', label: '视频', match: ['/videos'] },
   { to: '/exercises', label: '习题推荐', match: ['/exercises'] },
   { to: '/learning-analysis', label: '学情分析', match: ['/learning-analysis'], adminOnly: true },
+  { to: '/my-learning', label: '我的学情', match: ['/my-learning'], studentOnly: true },
   { to: '/ops', label: '运维', match: ['/ops'], adminOnly: true },
   { to: '/guide', label: '使用指南', match: ['/guide'] }
 ]
 
 const visibleNavItems = computed(() => {
   const items = props.navItems.length ? props.navItems : defaultNavItems
-  return items.filter((item) => !(item.adminOnly && !userStore.isAdmin))
+  return items.filter((item) => {
+    if (item.studentOnly) return userStore.isLoggedIn && !userStore.isAdmin
+    return !item.adminOnly || userStore.isAdmin
+  })
 })
 
 function isActive(item) {

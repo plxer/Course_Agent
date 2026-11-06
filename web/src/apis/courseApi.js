@@ -306,3 +306,8 @@ export function uploadCourseImage(file) {
     true
   )
 }
+
+/** 当前登录用户的个人学情 */
+export function getPersonalLearningAnalysis() {
+  return apiGet('/api/course/learning-analysis', {}, true)
+}
